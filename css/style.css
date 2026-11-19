@@ -32,6 +32,20 @@ body { background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -ap
 .btn { background: var(--bg); color: var(--text); border: 1px solid var(--border); padding: 7px 12px; border-radius: 8px; cursor: pointer; font: inherit; }
 .btn:hover { border-color: var(--accent); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.live-controls[hidden] { display: none; }
+.live-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 8px; font: inherit; }
+.btn.live .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 4px; }
+.btn.live.on { border-color: var(--down); }
+.btn.live.on .dot { background: var(--down); animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .btn.live.on .dot { animation: none; } }
+.pill { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); font-variant-numeric: tabular-nums; }
+.pill.live { color: var(--up); border-color: var(--up); }
+.pill.warn { color: var(--warn); border-color: var(--warn); }
+.pill.error { color: var(--down); border-color: var(--down); max-width: 360px; white-space: normal; }
+.verdict { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; font-size: 13px; border: 1px solid var(--border); }
+.verdict.good { border-color: var(--up); } .verdict.bad { border-color: var(--down); } .verdict.mid { border-color: var(--warn); }
 .layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 12px; padding: 12px; }
 .chart-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
 .chart-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--border); }

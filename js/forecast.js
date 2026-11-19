@@ -143,6 +143,15 @@
     };
   }
 
+  // Limite inferior do intervalo de Wilson (95%). As janelas do backtest se sobrepõem em
+  // `horizon` candles, então a amostra efetiva é n / horizon.
+  function wilsonLower(hits, n, horizon) {
+    if (!n) return null;
+    const ne = Math.max(1, n / Math.max(1, horizon));
+    const p = hits / n, z = 1.96, z2 = z * z;
+    return (p + z2 / (2 * ne) - z * Math.sqrt((p * (1 - p) + z2 / (4 * ne)) / ne)) / (1 + z2 / ne);
+  }
+
   // Backtest walk-forward: o score no candle i é comparado ao retorno em i+H,
   // sem atravessar pregões (day trade não carrega posição).
   function backtest(candles, ind, horizon, thresholds) {
@@ -169,6 +178,8 @@
       rows: rows.map(r => ({
         threshold: r.threshold, signals: r.n,
         hitRate: r.n ? r.hits / r.n : null,
+        hitLow: wilsonLower(r.hits, r.n, horizon),
+        effectiveN: r.n ? Math.max(1, Math.round(r.n / horizon)) : 0,
         avgReturnPct: r.n ? (r.sumRet / r.n) * 100 : null
       }))
     };
@@ -200,7 +211,7 @@
     };
   }
 
-  const api = { analyze, scoreAt, monteCarlo, backtest, biasLabel, mulberry32, quantile, stepMs, WEIGHTS, BIAS_THRESHOLD, DEFAULTS };
+  const api = { analyze, wilsonLower, scoreAt, monteCarlo, backtest, biasLabel, mulberry32, quantile, stepMs, WEIGHTS, BIAS_THRESHOLD, DEFAULTS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Coldigo = Object.assign(root.Coldigo || {}, { Forecast: api });
 })(typeof self !== 'undefined' ? self : this);

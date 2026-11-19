@@ -13,6 +13,17 @@ npm test             # testes unitários (Node 18+)
 2. O gráfico mostra candles, VWAP, EMA 9/21, Bollinger (opcional), suportes/resistências, pivôs, volume e RSI. Roda do mouse ou pinça = zoom, arrastar = mover, duplo clique = reiniciar a visão. Funciona também no celular, com toque.
 3. O painel lateral traz o viés, a faixa de preço esperada, probabilidades de alvo/stop, composição do score e o backtest. Todos os parâmetros são editáveis.
 
+### Modo ao vivo (Binance)
+
+O botão **Ao vivo** busca o histórico e acompanha o preço em tempo real pelo feed público da Binance (sem chave), com reconexão automática. Pares: BTC, ETH, BNB, SOL, XRP e DOGE contra USDT, em 1, 3, 5 e 15 minutos. A análise é refeita a cada segundo e imediatamente quando um candle fecha; o candle em formação ainda pode mudar, então o sinal oscila até ele fechar.
+
+- A **Quotex não tem API pública**, então a ferramenta não lê preços de dentro dela. Em ativos OTC a corretora gera os próprios preços, e nenhuma análise de mercado se aplica a eles.
+- O modo ao vivo precisa de uma página com acesso à internet aberta: `npm start` ou uma hospedagem estática (por exemplo o GitHub Pages, em Settings → Pages → Deploy from branch → `master`, depois de mergear). A cópia publicada como artefato do Claude bloqueia conexões externas e esconde esses controles.
+
+### Cartão de opção binária
+
+Compara a expiração escolhida (o horizonte, em candles) com o **ponto de empate** do seu payout: `1 / (1 + payout)`, ou 54,1% para 85%. Mostra a probabilidade do modelo, o acerto histórico do sinal naquela força de score e o **limite inferior de 95%** (intervalo de Wilson, com a amostra reduzida porque as janelas se sobrepõem). O veredito só diz que há vantagem quando esse limite inferior supera o ponto de empate.
+
 ### Formato dos dados
 
 CSV com data/hora, abertura, máxima, mínima, fechamento e volume. Aceita `,` `;` ou tab, cabeçalho em português ou inglês, `dd/mm/aaaa` ou ISO, decimal com vírgula, epoch, e exportações do MetaTrader (`<DATE> <TIME>` separados). Sem cabeçalho: 6 colunas = `datetime,o,h,l,c,v`; 7 colunas = `data,hora,o,h,l,c,v`.
@@ -26,7 +37,7 @@ CSV com data/hora, abertura, máxima, mínima, fechamento e volume. Aceita `,` `
 | **Alvo × stop** | Alvo e stop em múltiplos do ATR(14); mede quantas trajetórias tocam o alvo, o stop ou nenhum dentro do horizonte (empate no mesmo candle conta como stop). |
 | **Backtest walk-forward** | Para cada candle do histórico compara o score com o retorno `horizonte` candles depois, sem atravessar pregões. Mostra taxa de acerto e retorno médio por faixa de score. |
 
-Indicadores são causais (nenhum usa candles futuros). Os arquivos estão em `js/`: `indicators.js`, `forecast.js`, `data.js`, `chart.js`, `app.js`.
+Indicadores são causais (nenhum usa candles futuros). Os arquivos estão em `js/`: `indicators.js`, `forecast.js`, `data.js`, `live.js`, `chart.js`, `app.js`.
 
 ## Limites que você deve conhecer
 

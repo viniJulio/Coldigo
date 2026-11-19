@@ -117,7 +117,7 @@
       this._timeAxis(ctx, th, L, X, i0, i1, n, H);
 
       ctx.save();
-      ctx.beginPath(); ctx.rect(0, 0, L.plotW, L.timeY); ctx.clip();
+      ctx.beginPath(); ctx.rect(0, 0, L.plotW, P.h); ctx.clip();
 
       // Região de projeção
       if (H) {

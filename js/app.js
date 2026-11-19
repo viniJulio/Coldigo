@@ -1,10 +1,10 @@
 (function () {
   'use strict';
-  const { Forecast, Data, Chart } = window.Coldigo;
+  const { Forecast, Data, Chart, Live } = window.Coldigo;
   const $ = id => document.getElementById(id);
 
-  const params = { horizon: 12, simulations: 2000, window: 300, driftFactor: 0.1, tpAtr: 1.5, slAtr: 1 };
-  const state = { candles: [], analysis: null, source: '' };
+  const params = { horizon: 12, simulations: 2000, window: 300, driftFactor: 0.1, tpAtr: 1.5, slAtr: 1, payout: 85 };
+  const state = { candles: [], analysis: null, source: '', live: null, liveLen: 0 };
   const chart = new Chart($('chart'), $('tooltip'));
 
   const PART_LABELS = { trend: 'Tendência', vwap: 'VWAP', momentum: 'Momentum', rsi: 'RSI', bollinger: 'Bollinger' };
@@ -19,8 +19,9 @@
   }
 
   function load(candles, source) {
+    stopLive();
     try {
-      state.candles = candles; state.source = source;
+      state.candles = candles; state.source = source; state.liveLen = candles.length;
       showError('');
       analyze(true);
     } catch (e) {
@@ -54,6 +55,36 @@
     if (p.bollinger < -0.05) out.push('preço esticado acima da banda de Bollinger');
     if (p.bollinger > 0.05) out.push('preço esticado abaixo da banda de Bollinger');
     return out.length ? out.join('; ') + '.' : 'Sinais mistos: nenhum indicador domina.';
+  }
+
+  function binaryCard(a) {
+    const f = a.forecast, bt = a.backtest;
+    const payout = params.payout / 100, be = 1 / (1 + payout);
+    const mins = Math.round(f.horizon * a.stepMs / 60000);
+    const head = `<div class="card"><h3>Opção binária · expiração em ${f.horizon} candles (~${mins} min)</h3>`;
+    const rowBE = `<div class="row"><span>Ponto de empate (payout ${params.payout}%)</span><b>${pct(be)}</b></div>`;
+    if (a.bias === 'neutral') {
+      return head + rowBE + '<div class="verdict mid">Viés neutro: não há sinal para esta expiração.</div></div>';
+    }
+    const dirName = a.bias === 'up' ? 'ACIMA (CALL)' : 'ABAIXO (PUT)';
+    const modelP = a.bias === 'up' ? f.probUp : 1 - f.probUp;
+    const row = bt.rows.filter(r => r.threshold <= Math.abs(a.score)).pop();
+    let body = `<div class="row"><span>Direção do sinal</span><b>${dirName}</b></div>${rowBE}` +
+      `<div class="row"><span>Probabilidade do modelo</span><b>${pct(modelP)}</b></div>`;
+    let verdict;
+    if (!row || row.signals === 0) {
+      verdict = ['mid', 'Poucos sinais nesta força de score no histórico carregado.'];
+    } else {
+      body += `<div class="row"><span>Acerto histórico (score ≥ ${num(row.threshold)})</span><b>${pct(row.hitRate)}</b></div>` +
+        `<div class="row"><span>Limite inferior (95%)</span><b>${pct(row.hitLow)}</b></div>` +
+        `<div class="row"><span>Amostra</span><b>${row.signals} sinais (~${row.effectiveN} independentes)</b></div>`;
+      if (row.effectiveN < 30) verdict = ['mid', 'Amostra pequena: carregue mais histórico antes de confiar neste número.'];
+      else if (row.hitLow > be) verdict = ['good', 'No histórico, o acerto superou o ponto de empate com margem estatística. Não garante o futuro.'];
+      else if (row.hitRate > be) verdict = ['mid', 'O acerto passou do ponto de empate, mas a margem de erro ainda inclui prejuízo. Vantagem não comprovada.'];
+      else verdict = ['bad', 'No histórico, o acerto ficou abaixo do ponto de empate. Neste ativo e tempo gráfico o sinal perde dinheiro.'];
+    }
+    return head + body + `<div class="verdict ${verdict[0]}">${verdict[1]}</div>` +
+      '<p class="note" style="margin:8px 0 0">A "probabilidade do modelo" vem da simulação e do viés, sem validação. O que vale é o acerto histórico e seu limite inferior.</p></div>';
   }
 
   function renderSide() {
@@ -113,6 +144,8 @@
         ${a.bias === 'neutral' ? '<p class="note">Viés neutro: mostrando o lado comprado como referência.</p>' : ''}
       </div>
 
+      ${binaryCard(a)}
+
       <div class="card parts">
         <h3>Composição do score</h3>
         ${partsHtml}
@@ -134,8 +167,9 @@
       <div class="card">
         <h3>Parâmetros</h3>
         <div class="params">
-          <label for="p-horizon">Horizonte (candles)</label><input id="p-horizon" type="number" min="3" max="60" value="${params.horizon}">
+          <label for="p-horizon">Horizonte / expiração (candles)</label><input id="p-horizon" type="number" min="3" max="60" value="${params.horizon}">
           <label for="p-tp">Alvo (× ATR)</label><input id="p-tp" type="number" min="0.2" max="10" step="0.1" value="${params.tpAtr}">
+          <label for="p-payout">Payout (%)</label><input id="p-payout" type="number" min="50" max="100" step="1" value="${params.payout}">
           <label for="p-sl">Stop (× ATR)</label><input id="p-sl" type="number" min="0.2" max="10" step="0.1" value="${params.slAtr}">
           <label for="p-win">Janela de volatilidade</label><input id="p-win" type="number" min="30" max="2000" step="10" value="${params.window}">
           <label for="p-drift">Peso do viés (drift)</label><input id="p-drift" type="number" min="0" max="1" step="0.05" value="${params.driftFactor}">
@@ -153,10 +187,72 @@
       try { showError(''); analyze(key === 'horizon'); } catch (err) { showError(err.message); }
     });
     bind('p-horizon', 'horizon', v => Math.max(3, Math.min(60, parseInt(v, 10))));
-    bind('p-tp', 'tpAtr', parseFloat); bind('p-sl', 'slAtr', parseFloat);
+    bind('p-payout', 'payout', v => Math.max(50, Math.min(100, parseFloat(v)))); bind('p-tp', 'tpAtr', parseFloat); bind('p-sl', 'slAtr', parseFloat);
     bind('p-win', 'window', v => parseInt(v, 10)); bind('p-drift', 'driftFactor', parseFloat);
     bind('p-sims', 'simulations', v => Math.max(200, Math.min(20000, parseInt(v, 10))));
   }
+
+  // --- Ao vivo (Binance) ---
+  let pendingTimer = null, lastRun = 0, countdownTimer = null, liveStatus = 'idle';
+  const symSel = $('live-symbol'), intSel = $('live-interval'), liveBtn = $('btn-live'), pill = $('live-status');
+  Live.SYMBOLS.forEach(sy => symSel.add(new Option(sy.replace('USDT', '/USDT'), sy)));
+
+  function setStatus(kind, msg) {
+    liveStatus = kind;
+    pill.hidden = kind === 'idle';
+    pill.className = 'pill ' + (kind === 'live' ? 'live' : kind === 'error' ? 'error' : 'warn');
+    if (kind === 'connecting') pill.textContent = 'conectando…';
+    else if (kind === 'reconnecting') pill.textContent = 'reconectando…';
+    else if (kind === 'error') pill.textContent = msg || 'erro';
+    else tickCountdown();
+    if (kind === 'error') showError(msg);
+  }
+
+  function tickCountdown() {
+    if (!state.live || liveStatus !== 'live' || !state.candles.length) return;
+    const last = state.candles[state.candles.length - 1];
+    const left = Math.max(0, Math.ceil((last.t + state.live.intervalMs - Date.now()) / 1000));
+    pill.textContent = `ao vivo · candle fecha em ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+  }
+
+  function runLive() {
+    clearTimeout(pendingTimer); pendingTimer = null; lastRun = Date.now();
+    const n = state.candles.length, H = chart.horizon();
+    // se o usuário está acompanhando o candle atual, a janela anda junto com os novos candles
+    const following = chart.view.start + chart.view.count - H >= state.liveLen - 1.5;
+    if (following) chart.view.start += n - state.liveLen;
+    state.liveLen = n;
+    try { analyze(false); } catch (e) { showError(e.message); }
+  }
+
+  function onLiveData(candles, info) {
+    state.candles = candles;
+    state.source = `Binance · ${symSel.value.replace('USDT', '/USDT')} · ${intSel.value} (ao vivo)`;
+    if (info.reset) { state.liveLen = candles.length; showError(''); try { analyze(true); } catch (e) { showError(e.message); } lastRun = Date.now(); return; }
+    // reanalisa no máximo 1x por segundo, e na hora ao fechar um candle
+    const wait = 1000 - (Date.now() - lastRun);
+    if (info.closed || wait <= 0) runLive();
+    else if (!pendingTimer) pendingTimer = setTimeout(runLive, wait);
+  }
+
+  function startLive() {
+    stopLive();
+    state.live = new Live.LiveFeed({ symbol: symSel.value, interval: intSel.value, onData: onLiveData, onStatus: setStatus });
+    liveBtn.classList.add('on'); liveBtn.setAttribute('aria-pressed', 'true');
+    countdownTimer = setInterval(tickCountdown, 1000);
+    state.live.start();
+  }
+
+  function stopLive() {
+    if (state.live) { state.live.stop(); state.live = null; }
+    clearInterval(countdownTimer); clearTimeout(pendingTimer); pendingTimer = null;
+    liveBtn.classList.remove('on'); liveBtn.setAttribute('aria-pressed', 'false');
+    setStatus('idle');
+  }
+
+  liveBtn.addEventListener('click', () => (state.live ? stopLive() : startLive()));
+  [symSel, intSel].forEach(el => el.addEventListener('change', () => { if (state.live) startLive(); }));
+  if (window.COLDIGO_NO_LIVE) $('live-controls').hidden = true;
 
   // --- Entradas ---
   function demo() {
