@@ -342,18 +342,53 @@
 
     _bind() {
       const c = this.canvas;
+      this.pointers = new Map();
+      this.pinch = null;
       const pos = e => { const r = c.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
-      c.addEventListener('mousemove', e => {
-        this.mouse = pos(e);
-        if (this.drag) {
-          const dx = this.mouse.x - this.drag.x;
-          this.view.start = this.drag.start - dx / this.barW;
+      const startPinch = () => {
+        const [p1, p2] = Array.from(this.pointers.values());
+        const cx = (p1.x + p2.x) / 2;
+        this.pinch = { dist: Math.hypot(p1.x - p2.x, p1.y - p2.y) || 1, count: this.view.count, idx: cx / this.barW + this.view.start };
+      };
+      c.addEventListener('pointerdown', e => {
+        try { c.setPointerCapture(e.pointerId); } catch (_) { /* ignora */ }
+        const p = pos(e);
+        this.pointers.set(e.pointerId, p);
+        this.mouse = p;
+        if (this.pointers.size === 1) this.drag = { x: p.x, start: this.view.start };
+        else if (this.pointers.size === 2) { this.drag = null; startPinch(); }
+        c.style.cursor = 'grabbing';
+        this.render();
+      });
+      c.addEventListener('pointermove', e => {
+        const p = pos(e);
+        this.mouse = p;
+        if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, p);
+        if (this.pinch && this.pointers.size >= 2) {
+          const [p1, p2] = Array.from(this.pointers.values());
+          const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y) || 1;
+          const cx = (p1.x + p2.x) / 2;
+          this.view.count = this.pinch.count * (this.pinch.dist / dist);
+          this._clampView();
+          this.view.start = this.pinch.idx - cx / (this.L.plotW / this.view.count);
+        } else if (this.drag) {
+          this.view.start = this.drag.start - (p.x - this.drag.x) / this.barW;
         }
         this.render();
       });
-      c.addEventListener('mouseleave', () => { this.mouse = null; this.drag = null; this.render(); });
-      c.addEventListener('mousedown', e => { const p = pos(e); this.drag = { x: p.x, start: this.view.start }; c.style.cursor = 'grabbing'; });
-      window.addEventListener('mouseup', () => { this.drag = null; c.style.cursor = 'crosshair'; });
+      const end = e => {
+        this.pointers.delete(e.pointerId);
+        this.pinch = null;
+        if (this.pointers.size === 1) {
+          const rest = Array.from(this.pointers.values())[0];
+          this.drag = { x: rest.x, start: this.view.start };
+        } else this.drag = null;
+        c.style.cursor = 'crosshair';
+        if (e.pointerType === 'mouse' && e.type === 'pointerleave') { this.mouse = null; this.render(); }
+      };
+      c.addEventListener('pointerup', end);
+      c.addEventListener('pointercancel', end);
+      c.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') { this.pointers.delete(e.pointerId); this.drag = null; this.mouse = null; this.render(); } });
       c.addEventListener('dblclick', () => { this.resetView(); this.render(); });
       c.addEventListener('wheel', e => {
         e.preventDefault();

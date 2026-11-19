@@ -10,7 +10,7 @@ npm test             # testes unitários (Node 18+)
 ```
 
 1. Clique em **Carregar CSV** (ou arraste o arquivo, ou **Colar dados**). **Gerar demonstração** cria dados sintéticos para testar.
-2. O gráfico mostra candles, VWAP, EMA 9/21, Bollinger (opcional), suportes/resistências, pivôs, volume e RSI. Roda do mouse = zoom, arrastar = mover, duplo clique = reiniciar a visão.
+2. O gráfico mostra candles, VWAP, EMA 9/21, Bollinger (opcional), suportes/resistências, pivôs, volume e RSI. Roda do mouse ou pinça = zoom, arrastar = mover, duplo clique = reiniciar a visão. Funciona também no celular, com toque.
 3. O painel lateral traz o viés, a faixa de preço esperada, probabilidades de alvo/stop, composição do score e o backtest. Todos os parâmetros são editáveis.
 
 ### Formato dos dados

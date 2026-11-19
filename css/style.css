@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   --bg: #0e1116; --panel: #161b22; --border: #262d38; --text: #d7dde6; --muted: #8b95a5;
   --accent: #4c8dff; --up: #22b573; --down: #ec4d5c; --warn: #e3a72f;
   --chart-bg: #0e1116; --chart-grid: #222a35; --chart-text: #8b95a5; --chart-cross: #5b6678;
@@ -6,11 +7,19 @@
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
+      --bg: #f4f6f9; --panel: #ffffff; --border: #dbe0e8; --text: #1b2330; --muted: #5d6b80;
+    --accent: #1f6feb; --up: #138a55; --down: #d12f3f; --warn: #b07800;
+    --chart-bg: #ffffff; --chart-grid: #e6eaf0; --chart-text: #5d6b80; --chart-cross: #8a96a8;
+    --c-vwap: #b07800; --c-ema9: #1f6feb; --c-ema21: #8a3ee0; --c-bb: #7a8799; --c-forecast: #1f6feb; --c-rsi: #8a3ee0;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
     --bg: #f4f6f9; --panel: #ffffff; --border: #dbe0e8; --text: #1b2330; --muted: #5d6b80;
     --accent: #1f6feb; --up: #138a55; --down: #d12f3f; --warn: #b07800;
     --chart-bg: #ffffff; --chart-grid: #e6eaf0; --chart-text: #5d6b80; --chart-cross: #8a96a8;
     --c-vwap: #b07800; --c-ema9: #1f6feb; --c-ema21: #8a3ee0; --c-bb: #7a8799; --c-forecast: #1f6feb; --c-rsi: #8a3ee0;
-  }
+    color-scheme: light;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -34,7 +43,7 @@ body { background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -ap
 .tooltip b { color: var(--text); font-weight: 600; }
 .pos { color: var(--up); } .neg { color: var(--down); }
 .chart-wrap { position: relative; flex: 1; min-height: 360px; }
-.chart-wrap canvas { position: absolute; inset: 0; display: block; }
+.chart-wrap canvas { position: absolute; inset: 0; display: block; touch-action: pan-y; }
 .error { margin: 10px; padding: 10px 12px; border: 1px solid var(--down); color: var(--down); border-radius: 8px; }
 .side { overflow-y: auto; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
 .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
