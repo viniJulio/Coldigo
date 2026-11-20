@@ -24,6 +24,23 @@ O botão **Ao vivo** busca o histórico e acompanha o preço em tempo real pelo 
 
 Compara a expiração escolhida (o horizonte, em candles) com o **ponto de empate** do seu payout: `1 / (1 + payout)`, ou 54,1% para 85%. Mostra a probabilidade do modelo, o acerto histórico do sinal naquela força de score e o **limite inferior de 95%** (intervalo de Wilson, com a amostra reduzida porque as janelas se sobrepõem). O veredito só diz que há vantagem quando esse limite inferior supera o ponto de empate.
 
+### Alerta de sinal forte
+
+O alerta só dispara quando **todos** os critérios passam ao mesmo tempo, avaliados no fechamento de cada candle:
+
+1. força do score (padrão ≥ 0,50);
+2. probabilidade do modelo (padrão ≥ 55%);
+3. amostra histórica independente suficiente (padrão ≥ 20);
+4. limite inferior de 95% do acerto histórico acima do ponto de empate do payout.
+
+Quando dispara, aparece um banner no gráfico, toca um som e o celular vibra. Os critérios são editáveis e o cartão mostra qual passou ou falhou. A tela fica ligada enquanto o modo ao vivo está ativo (se o navegador permitir); a página precisa ficar aberta, pois não há notificação com a aba fechada. Rigor alto significa poucos alertas, e zero alertas é um resultado normal quando o histórico não mostra vantagem. Isso não é certeza: é um filtro estatístico, e cada operação pode perder.
+
+O mesmo cartão mostra o que a regra teria feito nos candles carregados (operações, acerto, resultado, maior queda). A simulação usa só informação disponível em cada momento e tem no máximo uma operação aberta por vez, mas os critérios foram escolhidos olhando os mesmos dados, então o resultado tende a ser otimista.
+
+### Simulador de operações
+
+Carteira fictícia (R$ 1.000 iniciais) de opções binárias, no modo ao vivo: **CALL** (acima) ou **PUT** (abaixo), valor por operação, payout e expiração configuráveis. A operação entra ao preço atual e é liquidada no vencimento (vitória paga o payout, derrota perde o valor, empate devolve). Há opção de entrar automaticamente nos alertas. Entradas aparecem como triângulos no gráfico e o saldo, as operações e as preferências ficam salvos no navegador. O acerto só significa algo com muitas operações (100 ou mais) e deve ser comparado com o ponto de empate. Operar no simulador em tempo real é o teste fora da amostra que o backtest não consegue ser.
+
 ### Formato dos dados
 
 CSV com data/hora, abertura, máxima, mínima, fechamento e volume. Aceita `,` `;` ou tab, cabeçalho em português ou inglês, `dd/mm/aaaa` ou ISO, decimal com vírgula, epoch, e exportações do MetaTrader (`<DATE> <TIME>` separados). Sem cabeçalho: 6 colunas = `datetime,o,h,l,c,v`; 7 colunas = `data,hora,o,h,l,c,v`.
@@ -37,7 +54,7 @@ CSV com data/hora, abertura, máxima, mínima, fechamento e volume. Aceita `,` `
 | **Alvo × stop** | Alvo e stop em múltiplos do ATR(14); mede quantas trajetórias tocam o alvo, o stop ou nenhum dentro do horizonte (empate no mesmo candle conta como stop). |
 | **Backtest walk-forward** | Para cada candle do histórico compara o score com o retorno `horizonte` candles depois, sem atravessar pregões. Mostra taxa de acerto e retorno médio por faixa de score. |
 
-Indicadores são causais (nenhum usa candles futuros). Os arquivos estão em `js/`: `indicators.js`, `forecast.js`, `data.js`, `live.js`, `chart.js`, `app.js`.
+Indicadores são causais (nenhum usa candles futuros). Os arquivos estão em `js/`: `indicators.js`, `forecast.js`, `data.js`, `live.js`, `sim.js`, `chart.js`, `app.js`.
 
 ## Limites que você deve conhecer
 

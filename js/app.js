@@ -1,17 +1,37 @@
 (function () {
   'use strict';
-  const { Forecast, Data, Chart, Live } = window.Coldigo;
+  const { Forecast, Data, Chart, Live, Sim } = window.Coldigo;
   const $ = id => document.getElementById(id);
 
   const params = { horizon: 12, simulations: 2000, window: 300, driftFactor: 0.1, tpAtr: 1.5, slAtr: 1, payout: 85 };
-  const state = { candles: [], analysis: null, source: '', live: null, liveLen: 0 };
+  const alertCfg = Object.assign({}, Sim.DEFAULT_CFG);
+  const prefs = { stake: 10, auto: false, sound: true };
+  const state = { candles: [], analysis: null, source: '', live: null, liveLen: 0, alert: null, alertLog: [], bannerDismissed: null };
   const chart = new Chart($('chart'), $('tooltip'));
 
   const PART_LABELS = { trend: 'Tendência', vwap: 'VWAP', momentum: 'Momentum', rsi: 'RSI', bollinger: 'Bollinger' };
   const BIAS_TEXT = { up: 'ALTA', down: 'BAIXA', neutral: 'NEUTRO' };
-  const pct = v => (v * 100).toFixed(1).replace('.', ',') + '%';
+  const pct = v => (v == null ? '–' : (v * 100).toFixed(1).replace('.', ',') + '%');
   const num = (v, d = 2) => v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
   const sgn = v => (v >= 0 ? '+' : '') + num(v);
+  const money = v => (v < 0 ? '−' : '') + 'R$ ' + num(Math.abs(v));
+  const smoney = v => (v > 0 ? '+' : v < 0 ? '−' : '') + 'R$ ' + num(Math.abs(v));
+  const z2 = v => String(v).padStart(2, '0');
+  const hhmm = t => { const d = new Date(t); return `${z2(d.getHours())}:${z2(d.getMinutes())}`; };
+  const mmss = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${z2(s % 60)}`; };
+  const SIDE_TXT = { up: '▲ CALL', down: '▼ PUT' };
+
+  // --- Persistência local (tolerante a falhas) ---
+  const KEY = 'coldigo.sim.v1';
+  const store = {
+    get() { try { return JSON.parse(localStorage.getItem(KEY)); } catch (_) { return null; } },
+    set(v) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (_) { /* ignora */ } }
+  };
+  const saved = store.get() || {};
+  let portfolio = new Sim.Portfolio(saved.portfolio);
+  Object.assign(prefs, saved.prefs);
+  Object.assign(alertCfg, saved.alertCfg);
+  function persist() { store.set({ portfolio, prefs, alertCfg }); }
 
   function showError(msg) {
     const el = $('error');
@@ -23,17 +43,20 @@
     try {
       state.candles = candles; state.source = source; state.liveLen = candles.length;
       showError('');
-      analyze(true);
+      analyze(true, 'silent');
     } catch (e) {
       showError(e.message);
     }
   }
 
-  function analyze(resetView) {
+  // alertMode: 'none' (tick), 'silent' (recalcula sem avisar), 'notify' (fechamento de candle ao vivo)
+  function analyze(resetView, alertMode) {
     state.analysis = Forecast.analyze(state.candles, params);
     chart.setData(state.candles, state.analysis, resetView);
     renderMeta();
-    renderSide();
+    renderMain();
+    if (alertMode === 'silent') refreshAlert(false);
+    else if (alertMode === 'notify') refreshAlert(true);
   }
 
   function renderMeta() {
@@ -87,7 +110,8 @@
       '<p class="note" style="margin:8px 0 0">A "probabilidade do modelo" vem da simulação e do viés, sem validação. O que vale é o acerto histórico e seu limite inferior.</p></div>';
   }
 
-  function renderSide() {
+  // Cartões de análise: refeitos a cada atualização (não contêm campos editáveis)
+  function renderMain() {
     const a = state.analysis, f = a.forecast, last = f.bands[f.horizon - 1];
     const pos = ((a.score + 1) / 2) * 100;
     const side = a.bias === 'down' ? 'short' : 'long';
@@ -113,7 +137,7 @@
     else if (main.hitRate > 0.55 && main.avgReturnPct > 0) verdict = 'Neste histórico o sinal acertou acima do acaso. É resultado em amostra, sem garantia futura.';
     else verdict = 'Neste histórico o sinal não mostrou vantagem estatística clara. Use com cautela.';
 
-    $('side').innerHTML = `
+    $('sec-main').innerHTML = `
       <div class="card">
         <h3>Viés para os próximos ${f.horizon} candles (~${horizonMin} min)</h3>
         <div class="bias ${a.bias}"><span class="label">${BIAS_TEXT[a.bias]}</span><b>${sgn(a.score)}</b></div>
@@ -162,35 +186,235 @@
         <h3>Backtest do sinal (horizonte ${f.horizon})</h3>
         <table><thead><tr><th>Score</th><th>Sinais</th><th>Acerto</th><th>Retorno médio</th></tr></thead><tbody>${btRows}</tbody></table>
         <p class="note" style="margin:8px 0 0">Taxa de alta do período: ${bt.baseUpRate == null ? '–' : pct(bt.baseUpRate)} em ${bt.baseSamples} janelas (sobrepostas: os sinais não são independentes). ${verdict}</p>
-      </div>
+      </div>`;
 
+    const note = $('p-note');
+    if (note) note.textContent = `${f.simulations} trajetórias por bootstrap dos candles recentes (σ por candle ${num(f.sigma * 100, 3)}%). Se alvo e stop caírem no mesmo candle, conta-se o stop.`;
+    $('disclaimer').innerHTML = 'Estimativa estatística, não recomendação de investimento nem previsão garantida. Day trade e opções binárias envolvem risco de perda total do valor operado; custos, slippage e liquidez não estão incluídos. ' +
+      (state.source.startsWith('Demonstração') ? '<b>Dados de demonstração são sintéticos.</b>' : '');
+  }
+
+  // Parâmetros: desenhados uma única vez, para os campos não serem apagados pela atualização ao vivo
+  function renderParams() {
+    $('sec-params').innerHTML = `
       <div class="card">
         <h3>Parâmetros</h3>
         <div class="params">
           <label for="p-horizon">Horizonte / expiração (candles)</label><input id="p-horizon" type="number" min="3" max="60" value="${params.horizon}">
-          <label for="p-tp">Alvo (× ATR)</label><input id="p-tp" type="number" min="0.2" max="10" step="0.1" value="${params.tpAtr}">
           <label for="p-payout">Payout (%)</label><input id="p-payout" type="number" min="50" max="100" step="1" value="${params.payout}">
+          <label for="p-tp">Alvo (× ATR)</label><input id="p-tp" type="number" min="0.2" max="10" step="0.1" value="${params.tpAtr}">
           <label for="p-sl">Stop (× ATR)</label><input id="p-sl" type="number" min="0.2" max="10" step="0.1" value="${params.slAtr}">
           <label for="p-win">Janela de volatilidade</label><input id="p-win" type="number" min="30" max="2000" step="10" value="${params.window}">
           <label for="p-drift">Peso do viés (drift)</label><input id="p-drift" type="number" min="0" max="1" step="0.05" value="${params.driftFactor}">
           <label for="p-sims">Simulações</label><input id="p-sims" type="number" min="200" max="20000" step="200" value="${params.simulations}">
         </div>
-        <p class="note" style="margin-top:8px">${f.simulations} trajetórias por bootstrap dos candles recentes (σ por candle ${num(f.sigma * 100, 3)}%). Se alvo e stop caírem no mesmo candle, conta-se o stop.</p>
+        <p class="note" id="p-note" style="margin-top:8px"></p>
       </div>
 
-      <div class="disclaimer">Estimativa estatística, não recomendação de investimento nem previsão garantida. Day trade envolve risco de perda; custos, slippage e liquidez não estão incluídos. ${state.source.startsWith('Demonstração') ? '<b>Dados de demonstração são sintéticos.</b>' : ''}</div>`;
+      <div class="card">
+        <h3>Critérios do alerta de sinal forte</h3>
+        <div class="params">
+          <label for="a-score">Força mínima do score</label><input id="a-score" type="number" min="0.1" max="1" step="0.05" value="${alertCfg.minScore}">
+          <label for="a-model">Prob. mínima do modelo (%)</label><input id="a-model" type="number" min="50" max="95" step="1" value="${Math.round(alertCfg.minModelP * 100)}">
+          <label for="a-effn">Amostra independente mínima</label><input id="a-effn" type="number" min="1" max="500" step="1" value="${alertCfg.minEffN}">
+          <label for="a-margin">Margem sobre o empate (p.p.)</label><input id="a-margin" type="number" min="-20" max="30" step="0.5" value="${alertCfg.margin}">
+        </div>
+        <p class="note" style="margin-top:8px">Quanto mais rígidos os critérios, menos alertas. Afrouxar para ver mais sinais aumenta a chance de falsos alertas.</p>
+      </div>`;
 
-    const bind = (id, key, parse) => $(id).addEventListener('change', e => {
-      const v = parse(e.target.value);
+    const bind = (id, apply, rerun) => $(id).addEventListener('change', e => {
+      const v = parseFloat(e.target.value);
       if (!Number.isFinite(v)) return;
-      params[key] = v;
-      try { showError(''); analyze(key === 'horizon'); } catch (err) { showError(err.message); }
+      apply(v);
+      persist();
+      try { showError(''); rerun(); } catch (err) { showError(err.message); }
     });
-    bind('p-horizon', 'horizon', v => Math.max(3, Math.min(60, parseInt(v, 10))));
-    bind('p-payout', 'payout', v => Math.max(50, Math.min(100, parseFloat(v)))); bind('p-tp', 'tpAtr', parseFloat); bind('p-sl', 'slAtr', parseFloat);
-    bind('p-win', 'window', v => parseInt(v, 10)); bind('p-drift', 'driftFactor', parseFloat);
-    bind('p-sims', 'simulations', v => Math.max(200, Math.min(20000, parseInt(v, 10))));
+    const reanalyze = reset => () => { if (state.analysis) analyze(reset, 'silent'); };
+    const realert = () => { if (state.analysis) refreshAlert(false); };
+    bind('p-horizon', v => { params.horizon = Math.max(3, Math.min(60, Math.round(v))); }, reanalyze(true));
+    bind('p-payout', v => { params.payout = Math.max(50, Math.min(100, v)); }, reanalyze(false));
+    bind('p-tp', v => { params.tpAtr = v; }, reanalyze(false));
+    bind('p-sl', v => { params.slAtr = v; }, reanalyze(false));
+    bind('p-win', v => { params.window = Math.round(v); }, reanalyze(false));
+    bind('p-drift', v => { params.driftFactor = v; }, reanalyze(false));
+    bind('p-sims', v => { params.simulations = Math.max(200, Math.min(20000, Math.round(v))); }, reanalyze(false));
+    bind('a-score', v => { alertCfg.minScore = Math.max(0.1, Math.min(1, v)); }, realert);
+    bind('a-model', v => { alertCfg.minModelP = Math.max(50, Math.min(95, v)) / 100; }, realert);
+    bind('a-effn', v => { alertCfg.minEffN = Math.max(1, Math.round(v)); }, realert);
+    bind('a-margin', v => { alertCfg.margin = v; }, realert);
   }
+
+  // --- Alerta de sinal forte ---
+  const CHECK_LABELS = {
+    score: ['Força do sinal (|score|)', (v, n) => `${num(v)} ≥ ${num(n)}`],
+    model: ['Probabilidade do modelo', (v, n) => `${pct(v)} ≥ ${pct(n)}`],
+    sample: ['Amostra histórica independente', (v, n) => `${v} ≥ ${n}`],
+    edge: ['Acerto histórico (limite inferior 95%) acima do empate', (v, n) => `${pct(v)} > ${pct(n)}`]
+  };
+
+  function refreshAlert(notify) {
+    const a = state.analysis;
+    if (!a) return;
+    const res = Sim.evaluateAlert(state.candles, a, alertCfg, params.payout);
+    const hist = Sim.simulateHistory(state.candles, a.ind, params.horizon, alertCfg, params.payout, prefs.stake);
+    const last = state.candles[state.candles.length - 1];
+    state.alert = { res, hist, candleT: last.t, price: last.c };
+    if (notify && res.fire) fireAlert(res, last);
+    renderAlertCard();
+    renderBanner();
+  }
+
+  function fireAlert(res, last) {
+    const label = state.live ? state.live.symbol.replace('USDT', '/USDT') + ' · ' + state.live.interval : state.source;
+    const entry = { t: last.t + (state.live ? state.live.intervalMs : 0), side: res.side, label, auto: false };
+    if (prefs.auto && state.live && portfolio.open.length === 0) {
+      try { enterTrade(res.side, 'alerta'); entry.auto = true; } catch (e) { showError(e.message); }
+    }
+    state.alertLog.unshift(entry);
+    state.alertLog = state.alertLog.slice(0, 8);
+    state.bannerDismissed = null;
+    if (prefs.sound) { beep(); try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (_) { /* ignora */ } }
+  }
+
+  function renderAlertCard() {
+    const al = state.alert;
+    if (!al) { $('sec-alert').innerHTML = ''; return; }
+    const { res, hist } = al, st = hist.stats;
+    const checks = res.checks.map(c => {
+      const [label, fmt] = CHECK_LABELS[c.key];
+      const val = c.value == null ? '–' : fmt(c.value, c.need);
+      return `<li><span class="${c.ok ? 'ok' : 'no'}">${c.ok ? '✓' : '✗'}</span><span>${label}</span><span class="val">${val}</span></li>`;
+    }).join('');
+    const histTxt = st.trades === 0
+      ? 'Nenhuma operação teria sido feita com esta regra nos candles carregados.'
+      : `Seguindo esta regra nos candles carregados: ${st.trades} operações, acerto ${pct(st.winRate)}, resultado ${smoney(st.pnl)} (valor ${money(prefs.stake)}), maior queda ${money(st.maxDrawdown)}.` +
+        (st.trades < 30 ? ' Poucas operações: este resultado não prova nada.' : '');
+    const log = state.alertLog.length
+      ? '<div class="log"><b>Últimos alertas</b>' + state.alertLog.map(l => `<div>${hhmm(l.t)} · ${SIDE_TXT[l.side]} · ${l.label}${l.auto ? ' · entrada simulada' : ''}</div>`).join('') + '</div>' : '';
+    $('sec-alert').innerHTML = `
+      <div class="card alert-card ${res.fire ? 'firing' : ''}">
+        <h3>Alerta de sinal forte</h3>
+        <div class="alert-state ${res.fire ? 'on' : 'off'}">${res.fire ? `${SIDE_TXT[res.side]} · todos os critérios atendidos` : 'Sem sinal forte agora'}</div>
+        <ul class="checks">${checks}</ul>
+        <p class="note" style="margin:8px 0 0">Avaliado ${state.live ? 'no fechamento do candle, às ' + hhmm(al.candleT + state.live.intervalMs) : 'no último candle carregado'}. O alerta só dispara quando <b>todos</b> os critérios passam, e mesmo assim cada operação pode perder.</p>
+        <p class="note" style="margin:6px 0 0">${histTxt}</p>
+        ${log}
+      </div>`;
+  }
+
+  function renderBanner() {
+    const el = $('alert-banner'), al = state.alert;
+    if (!al || !al.res.fire || state.bannerDismissed === al.candleT) { el.hidden = true; return; }
+    const { res } = al, mins = Math.round(res.horizon * (state.analysis.stepMs / 60000));
+    el.className = 'alert-banner ' + (res.side === 'down' ? 'put' : '');
+    el.hidden = false;
+    el.innerHTML = `<span class="grow"><b>SINAL FORTE · ${SIDE_TXT[res.side]}</b> · expiração em ${res.horizon} candles (~${mins} min) · avaliado às ${hhmm(al.candleT + (state.live ? state.live.intervalMs : 0))}</span>` +
+      (state.live ? `<button class="btn small primary" data-act="enter" data-side="${res.side}">Simular entrada</button>` : '') +
+      '<button class="btn small" data-act="dismiss">Dispensar</button>';
+  }
+
+  $('alert-banner').addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.act === 'dismiss') { state.bannerDismissed = state.alert && state.alert.candleT; renderBanner(); }
+    if (b.dataset.act === 'enter') { ensureAudio(); try { enterTrade(b.dataset.side, 'alerta'); } catch (err) { showError(err.message); } }
+  });
+
+  // --- Som, vibração e tela ligada ---
+  let audioCtx = null, wake = null;
+  function ensureAudio() {
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (_) { /* sem áudio */ }
+  }
+  function beep() {
+    if (!audioCtx) return;
+    [0, 0.28, 0.56].forEach(d => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain(), t = audioCtx.currentTime + d;
+      o.frequency.value = 880; g.gain.value = 0.2;
+      o.connect(g); g.connect(audioCtx.destination); o.start(t); o.stop(t + 0.16);
+    });
+  }
+  async function lockScreen() { try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch (_) { /* opcional */ } }
+  function unlockScreen() { try { if (wake) wake.release(); } catch (_) { /* ignora */ } wake = null; }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && state.live) lockScreen(); });
+
+  // --- Simulador ---
+  function simReady() { return !!state.live && !!state.analysis && state.candles.length > 0; }
+
+  function enterTrade(side, source) {
+    if (!simReady()) throw new Error('Ative o modo Ao vivo para operar no simulador.');
+    const last = state.candles[state.candles.length - 1];
+    portfolio.openTrade({
+      side, price: last.c, t: Date.now(), stake: prefs.stake, payoutPct: params.payout, horizon: params.horizon,
+      intervalMs: state.live.intervalMs, symbol: state.live.symbol, source
+    });
+    persist(); syncMarkers(); renderSim();
+  }
+
+  function settleNow() {
+    if (!portfolio.open.length || !state.candles.length) return;
+    const done = portfolio.settle(state.candles, Date.now());
+    if (done.length) { persist(); syncMarkers(); renderSim(); }
+  }
+
+  function syncMarkers() {
+    const sym = state.live && state.live.symbol;
+    const mk = t => ({ t: t.t, price: t.entry, side: t.side, result: t.result || 'open' });
+    chart.markers = sym ? portfolio.open.concat(portfolio.closed.slice(-60)).filter(t => t.symbol === sym).map(mk) : [];
+    chart.render();
+  }
+
+  function renderSim() {
+    const st = portfolio.stats(), pnl = portfolio.balance + portfolio.open.reduce((s, t) => s + t.stake, 0) - portfolio.start;
+    const be = Sim.breakeven(params.payout);
+    $('sim-summary').innerHTML =
+      `<div class="row"><span>Saldo fictício</span><b>${money(portfolio.balance)}</b></div>` +
+      `<div class="row"><span>Resultado</span><b class="${pnl >= 0 ? 'pos' : 'neg'}">${smoney(Math.round(pnl * 100) / 100)}</b></div>` +
+      `<div class="row"><span>Operações encerradas</span><b>${st.trades}</b></div>` +
+      `<div class="row"><span>Acerto (ponto de empate ${pct(be)})</span><b>${pct(st.winRate)}</b></div>` +
+      (st.trades < 100 ? '<p class="note" style="margin:6px 0 0">Com menos de 100 operações o acerto ainda oscila demais. Acumule bastante antes de tirar conclusões.</p>' : '');
+    const ready = simReady();
+    $('sim-call').disabled = !ready; $('sim-put').disabled = !ready;
+    $('sim-hint').hidden = ready;
+    renderTrades();
+  }
+
+  function renderTrades() {
+    const now = Date.now();
+    const open = portfolio.open.map(t =>
+      `<div class="tr open"><span>${hhmm(t.t)}</span><span>${SIDE_TXT[t.side]}</span><span>${num(t.entry)} · ${money(t.stake)}</span><span>${mmss(t.expiry - now)}</span></div>`).join('');
+    $('sim-open').innerHTML = open ? `<div class="trades"><h4>Em andamento</h4>${open}</div>` : '';
+    const closed = portfolio.closed.slice(-8).reverse().map(t => {
+      const cls = t.result === 'win' ? 'pos' : t.result === 'loss' ? 'neg' : '';
+      const mark = t.result === 'win' ? '✓' : t.result === 'loss' ? '✗' : '=';
+      return `<div class="tr"><span>${hhmm(t.t)}</span><span>${SIDE_TXT[t.side]}</span><span>${num(t.entry)} → ${num(t.exit)}${t.approx ? ' (aprox.)' : ''}</span><span class="${cls}">${mark} ${smoney(t.pnl)}</span></div>`;
+    }).join('');
+    $('sim-history').innerHTML = closed ? `<div class="trades"><h4>Encerradas</h4>${closed}</div>` : '';
+  }
+
+  $('sim-stake').value = prefs.stake;
+  $('sim-auto').checked = !!prefs.auto;
+  $('sim-sound').checked = !!prefs.sound;
+  $('sim-stake').addEventListener('change', e => {
+    const v = parseFloat(e.target.value);
+    if (Number.isFinite(v) && v > 0) { prefs.stake = v; persist(); if (state.analysis) refreshAlert(false); } else e.target.value = prefs.stake;
+  });
+  $('sim-auto').addEventListener('change', e => { prefs.auto = e.target.checked; persist(); if (prefs.auto) ensureAudio(); });
+  $('sim-sound').addEventListener('change', e => { prefs.sound = e.target.checked; persist(); if (prefs.sound) ensureAudio(); });
+  const manual = side => () => { ensureAudio(); try { showError(''); enterTrade(side, 'manual'); } catch (err) { showError(err.message); } };
+  $('sim-call').addEventListener('click', manual('up'));
+  $('sim-put').addEventListener('click', manual('down'));
+  $('sim-reset').addEventListener('click', () => {
+    if ($('sim-reset').dataset.armed !== '1') {
+      $('sim-reset').dataset.armed = '1'; $('sim-reset').textContent = 'Toque de novo para confirmar';
+      setTimeout(() => { $('sim-reset').dataset.armed = '0'; $('sim-reset').textContent = 'Zerar simulador'; }, 4000);
+      return;
+    }
+    portfolio.reset(1000); persist(); syncMarkers(); renderSim();
+    $('sim-reset').dataset.armed = '0'; $('sim-reset').textContent = 'Zerar simulador';
+  });
 
   // --- Ao vivo (Binance) ---
   let pendingTimer = null, lastRun = 0, countdownTimer = null, liveStatus = 'idle';
@@ -206,48 +430,60 @@
     else if (kind === 'error') pill.textContent = msg || 'erro';
     else tickCountdown();
     if (kind === 'error') showError(msg);
+    renderSim();
   }
 
   function tickCountdown() {
     if (!state.live || liveStatus !== 'live' || !state.candles.length) return;
     const last = state.candles[state.candles.length - 1];
-    const left = Math.max(0, Math.ceil((last.t + state.live.intervalMs - Date.now()) / 1000));
-    pill.textContent = `ao vivo · candle fecha em ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    pill.textContent = `ao vivo · candle fecha em ${mmss(last.t + state.live.intervalMs - Date.now())}`;
   }
 
-  function runLive() {
+  function tick() { tickCountdown(); settleNow(); renderTrades(); }
+
+  function runLive(closed) {
     clearTimeout(pendingTimer); pendingTimer = null; lastRun = Date.now();
     const n = state.candles.length, H = chart.horizon();
     // se o usuário está acompanhando o candle atual, a janela anda junto com os novos candles
     const following = chart.view.start + chart.view.count - H >= state.liveLen - 1.5;
     if (following) chart.view.start += n - state.liveLen;
     state.liveLen = n;
-    try { analyze(false); } catch (e) { showError(e.message); }
+    try { analyze(false, closed ? 'notify' : 'none'); } catch (e) { showError(e.message); }
   }
 
   function onLiveData(candles, info) {
     state.candles = candles;
     state.source = `Binance · ${symSel.value.replace('USDT', '/USDT')} · ${intSel.value} (ao vivo)`;
-    if (info.reset) { state.liveLen = candles.length; showError(''); try { analyze(true); } catch (e) { showError(e.message); } lastRun = Date.now(); return; }
-    // reanalisa no máximo 1x por segundo, e na hora ao fechar um candle
+    settleNow();
+    if (info.reset) {
+      state.liveLen = candles.length; showError('');
+      try { analyze(true, 'silent'); } catch (e) { showError(e.message); }
+      lastRun = Date.now(); syncMarkers(); renderSim(); return;
+    }
+    // reanalisa no máximo 1x por segundo, e na hora ao fechar um candle (é quando o alerta é avaliado)
     const wait = 1000 - (Date.now() - lastRun);
-    if (info.closed || wait <= 0) runLive();
-    else if (!pendingTimer) pendingTimer = setTimeout(runLive, wait);
+    if (info.closed) runLive(true);
+    else if (wait <= 0) runLive(false);
+    else if (!pendingTimer) pendingTimer = setTimeout(() => runLive(false), wait);
   }
 
   function startLive() {
     stopLive();
+    ensureAudio(); lockScreen();
+    state.alertLog = []; state.alert = null; state.bannerDismissed = null;
     state.live = new Live.LiveFeed({ symbol: symSel.value, interval: intSel.value, onData: onLiveData, onStatus: setStatus });
     liveBtn.classList.add('on'); liveBtn.setAttribute('aria-pressed', 'true');
-    countdownTimer = setInterval(tickCountdown, 1000);
+    countdownTimer = setInterval(tick, 1000);
     state.live.start();
   }
 
   function stopLive() {
     if (state.live) { state.live.stop(); state.live = null; }
     clearInterval(countdownTimer); clearTimeout(pendingTimer); pendingTimer = null;
+    unlockScreen();
     liveBtn.classList.remove('on'); liveBtn.setAttribute('aria-pressed', 'false');
     setStatus('idle');
+    syncMarkers();
   }
 
   liveBtn.addEventListener('click', () => (state.live ? stopLive() : startLive()));
@@ -289,6 +525,8 @@
     try { load(Data.parseCSV(await f.text()), f.name); } catch (err) { showError(err.message); }
   });
 
+  renderParams();
+  renderSim();
   demo();
-  window.__coldigo = { state, chart, load };
+  window.__coldigo = { state, chart, load, portfolio: () => portfolio, enterTrade, prefs, alertCfg };
 })();

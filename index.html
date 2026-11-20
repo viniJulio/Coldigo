@@ -40,12 +40,38 @@
           <label><input type="checkbox" data-k="rsi" checked> RSI</label>
         </div>
       </div>
+      <div id="alert-banner" class="alert-banner" hidden role="status" aria-live="polite"></div>
       <div id="tooltip" class="tooltip">Toque ou passe o mouse para ver os valores · arraste = mover · pinça ou roda do mouse = zoom · duplo toque = reiniciar</div>
       <div class="chart-wrap"><canvas id="chart"></canvas></div>
       <div id="error" class="error" hidden></div>
     </section>
 
-    <aside class="side" id="side"></aside>
+    <aside class="side" id="side">
+      <div id="sec-alert"></div>
+
+      <div class="card" id="sim-card">
+        <h3>Simulador · dinheiro fictício</h3>
+        <div id="sim-summary"></div>
+        <div class="sim-form">
+          <label for="sim-stake">Valor por operação (R$)</label>
+          <input id="sim-stake" type="number" min="1" step="1" value="10">
+        </div>
+        <div class="sim-buttons">
+          <button class="btn call" id="sim-call" disabled>▲ CALL (acima)</button>
+          <button class="btn put" id="sim-put" disabled>▼ PUT (abaixo)</button>
+        </div>
+        <p class="note" id="sim-hint">Ative o modo <b>Ao vivo</b> para operar no simulador.</p>
+        <label class="chk"><input type="checkbox" id="sim-auto"> Entrar automaticamente nos sinais fortes</label>
+        <label class="chk"><input type="checkbox" id="sim-sound" checked> Som e vibração nos alertas</label>
+        <div id="sim-open"></div>
+        <div id="sim-history"></div>
+        <button class="btn small" id="sim-reset">Zerar simulador</button>
+      </div>
+
+      <div id="sec-main"></div>
+      <div id="sec-params"></div>
+      <div class="disclaimer" id="disclaimer"></div>
+    </aside>
   </main>
 
   <dialog id="paste-dialog">
@@ -65,6 +91,7 @@
   <script src="js/forecast.js"></script>
   <script src="js/data.js"></script>
   <script src="js/live.js"></script>
+  <script src="js/sim.js"></script>
   <script src="js/chart.js"></script>
   <script src="js/app.js"></script>
 </body>
