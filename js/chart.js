@@ -10,7 +10,7 @@
       this.canvas = canvas;
       this.ctx = canvas.getContext('2d');
       this.tooltip = tooltipEl;
-      this.candles = []; this.an = null;
+      this.candles = []; this.an = null; this.markers = [];
       this.show = { vwap: true, ema: true, bb: false, levels: true, forecast: true, volume: true, rsi: true, targets: true };
       this.view = { start: 0, count: 100 };
       this.mouse = null; this.drag = null;
@@ -145,6 +145,8 @@
         ctx.fillRect(x - bw / 2, Math.min(yo, yc), bw, Math.max(1, Math.abs(yc - yo)));
       }
 
+      this._markers(ctx, th, X, Y, i0, i1);
+
       // Médias, VWAP
       if (this.an) {
         if (this.show.ema) { this._line(ctx, X, Y, this.an.ind.ema9, i0, i1, th.ema9, 1.3); this._line(ctx, X, Y, this.an.ind.ema21, i0, i1, th.ema21, 1.3); }
@@ -168,6 +170,23 @@
 
       // Crosshair
       if (this.mouse && this.mouse.x < L.plotW && this.mouse.y < L.timeY) this._crosshair(ctx, th, L, lo, hi);
+    }
+
+    // Entradas do simulador: triângulo para cima (CALL) ou para baixo (PUT), colorido pelo resultado
+    _markers(ctx, th, X, Y, i0, i1) {
+      const cs = this.candles;
+      for (const m of this.markers) {
+        let lo = 0, hi = cs.length - 1, i = -1;
+        while (lo <= hi) { const mid = (lo + hi) >> 1; if (cs[mid].t <= m.t) { i = mid; lo = mid + 1; } else hi = mid - 1; }
+        if (i < i0 - 1 || i > i1 + 1) continue;
+        const x = X(i), y = Y(m.price), s = 6;
+        ctx.fillStyle = m.result === 'win' ? th.up : m.result === 'loss' ? th.down : m.result === 'tie' ? th.text : th.fc;
+        ctx.strokeStyle = th.bg; ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        if (m.side === 'up') { ctx.moveTo(x, y + 2); ctx.lineTo(x + s, y + 2 + 2 * s); ctx.lineTo(x - s, y + 2 + 2 * s); }
+        else { ctx.moveTo(x, y - 2); ctx.lineTo(x + s, y - 2 - 2 * s); ctx.lineTo(x - s, y - 2 - 2 * s); }
+        ctx.closePath(); ctx.stroke(); ctx.fill();
+      }
     }
 
     _timeAxis(ctx, th, L, X, i0, i1, n, H) {
@@ -206,7 +225,7 @@
       for (let i = i0; i <= i1; i++) {
         if (arr[i] == null) { started = false; continue; }
         // VWAP reinicia por pregão: não liga o último ponto de um dia ao primeiro do seguinte
-        if (started && dashed && this.candles[i].t - this.candles[i - 1].t > 12 * 3600000) started = false;
+        if (started && dashed && new Date(this.candles[i].t).getDate() !== new Date(this.candles[i - 1].t).getDate()) started = false;
         started ? ctx.lineTo(X(i), Y(arr[i])) : ctx.moveTo(X(i), Y(arr[i]));
         started = true;
       }
