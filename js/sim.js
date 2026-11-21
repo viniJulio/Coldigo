@@ -1,67 +1,37 @@
 /* Simulador de operações e alerta de sinal forte.
  *
- * - evaluateAlert: o alerta só dispara quando TODOS os critérios passam (força do score,
- *   probabilidade do modelo, amostra histórica suficiente e limite inferior do acerto
- *   acima do ponto de empate). Não é certeza: é um filtro estatístico rígido.
- * - Portfolio: carteira fictícia de opções binárias (CALL/PUT, expiração fixa, payout).
- * - simulateHistory: aplica a mesma regra ao histórico carregado, usando só informação
- *   disponível em cada momento (sem olhar o futuro). */
+ * - evaluateAlert: o alerta só dispara quando TODOS os critérios passam: modelo validado fora
+ *   da amostra (limite inferior do acerto acima do ponto de empate, amostra suficiente, melhor
+ *   que o acaso) e probabilidade atual acima do limiar. Não é certeza: é um filtro rígido.
+ * - Portfolio: carteira fictícia de opções binárias (CALL/PUT, expiração fixa, payout). */
 (function (root) {
   'use strict';
 
-  const dep = (name, file) => (typeof require !== 'undefined' && typeof module !== 'undefined')
-    ? require(file) : root.Coldigo[name];
-  const F = dep('Forecast', './forecast.js');
-  const I = dep('Indicators', './indicators.js');
-
-  const DEFAULT_CFG = { minScore: 0.5, minModelP: 0.55, minEffN: 20, margin: 0 };
+  const DEFAULT_CFG = { marginPct: 1, minN: 30 };
 
   const breakeven = payoutPct => 1 / (1 + payoutPct / 100);
   const round2 = x => Math.round(x * 100) / 100;
 
-  function evaluateAlert(candles, a, cfg, payoutPct) {
+  /** Alerta baseado no modelo validado fora da amostra. `m` = { p: P(alta) atual, research: resultado de Model.evaluate }.
+   *  Só dispara se TODOS os critérios passam. */
+  function evaluateAlert(m, cfg, payoutPct) {
     cfg = Object.assign({}, DEFAULT_CFG, cfg);
-    const be = breakeven(payoutPct), H = a.options.horizon;
-    const side = a.score > 0 ? 'up' : 'down';
-    const modelP = side === 'up' ? a.forecast.probUp : 1 - a.forecast.probUp;
-    const row = F.backtest(candles, a.ind, H, [cfg.minScore]).rows[0];
-    const need = be + cfg.margin / 100;
+    const be = breakeven(payoutPct), tStar = be + cfg.marginPct / 100;
+    const r = m.research;
+    if (!r || !r.star || m.p == null) return { fire: false, pending: true, side: null, checks: [], breakeven: be, tStar };
+    const side = m.p >= 0.5 ? 'up' : 'down', pDir = side === 'up' ? m.p : 1 - m.p;
     const checks = [
-      { key: 'score', ok: Math.abs(a.score) >= cfg.minScore, value: Math.abs(a.score), need: cfg.minScore },
-      { key: 'model', ok: modelP >= cfg.minModelP, value: modelP, need: cfg.minModelP },
-      { key: 'sample', ok: row.effectiveN >= cfg.minEffN, value: row.effectiveN, need: cfg.minEffN },
-      { key: 'edge', ok: row.hitLow != null && row.hitLow > need, value: row.hitLow, need }
+      { key: 'sample', ok: r.star.n >= cfg.minN, value: r.star.n, need: cfg.minN },
+      { key: 'edge', ok: r.star.hitLow != null && r.star.hitLow > be, value: r.star.hitLow, need: be },
+      { key: 'skill', ok: r.brierSkill != null && r.brierSkill > 0, value: r.brierSkill, need: 0 },
+      { key: 'prob', ok: pDir >= tStar, value: pDir, need: tStar }
     ];
-    return { fire: checks.every(c => c.ok), side, checks, row, breakeven: be, score: a.score, horizon: H };
+    return { fire: checks.every(c => c.ok), pending: false, side, pDir, checks, breakeven: be, tStar };
   }
 
-  /** Aplica a regra de alerta ao histórico, de forma causal, com no máximo uma operação aberta. */
-  function simulateHistory(candles, ind, horizon, cfg, payoutPct, stake) {
-    cfg = Object.assign({}, DEFAULT_CFG, cfg);
-    const be = breakeven(payoutPct), payout = payoutPct / 100, n = candles.length, H = horizon;
-    const sc = candles.map((_, i) => F.scoreAt(candles, ind, i));
-    const sameDay = (i, j) => I.sessionKey(candles[i].t) === I.sessionKey(candles[j].t);
-    let hits = 0, cnt = 0, nextFree = 0;
-    const trades = [];
-    for (let i = 0; i < n; i++) {
-      const j = i - H; // o resultado do sinal em j só é conhecido em i
-      if (j >= 0 && sc[j] && Math.abs(sc[j].score) >= cfg.minScore && sameDay(j, i)) {
-        cnt++;
-        if (Math.sign(sc[j].score) * (candles[i].c - candles[j].c) > 0) hits++;
-      }
-      const s = sc[i];
-      if (!s || Math.abs(s.score) < cfg.minScore || i + H >= n || i < nextFree || !sameDay(i, i + H)) continue;
-      if (cnt / H < cfg.minEffN) continue;
-      const low = F.wilsonLower(hits, cnt, H);
-      if (!(low > be + cfg.margin / 100)) continue;
-      const side = s.score > 0 ? 'up' : 'down', dir = s.score > 0 ? 1 : -1;
-      const diff = (candles[i + H].c - candles[i].c) * dir;
-      const result = diff > 0 ? 'win' : diff < 0 ? 'loss' : 'tie';
-      trades.push({ t: candles[i].t, side, entry: candles[i].c, exit: candles[i + H].c, result,
-        pnl: result === 'win' ? round2(stake * payout) : result === 'loss' ? -stake : 0 });
-      nextFree = i + H;
-    }
-    return { trades, stats: summarize(trades) };
+  /** Converte as operações da estratégia (fora da amostra) em resultado financeiro. */
+  function pnlTrades(trades, stake, payoutPct) {
+    return trades.map(t => ({ ...t, result: t.hit ? 'win' : 'loss', pnl: t.hit ? round2(stake * payoutPct / 100) : -stake }));
   }
 
   function summarize(trades) {
@@ -139,7 +109,7 @@
     toJSON() { return { start: this.start, balance: this.balance, open: this.open, closed: this.closed, seq: this.seq }; }
   }
 
-  const api = { evaluateAlert, simulateHistory, summarize, Portfolio, breakeven, candleAt, DEFAULT_CFG };
+  const api = { evaluateAlert, pnlTrades, summarize, Portfolio, breakeven, candleAt, DEFAULT_CFG };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Coldigo = Object.assign(root.Coldigo || {}, { Sim: api });
 })(typeof self !== 'undefined' ? self : this);
