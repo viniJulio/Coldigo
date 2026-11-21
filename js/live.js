@@ -9,8 +9,9 @@
   const INTERVAL_MS = { '1m': 60000, '3m': 180000, '5m': 300000, '15m': 900000 };
   const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT'];
 
-  const fromRest = k => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5] });
-  const fromWs = k => ({ t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v });
+  // nt = número de negócios; tb = volume comprado a mercado (taker buy), medida de fluxo de ordens
+  const fromRest = k => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5], nt: +k[8], tb: +k[9] });
+  const fromWs = k => ({ t: k.t, o: +k.o, h: +k.h, l: +k.l, c: +k.c, v: +k.v, nt: +k.n, tb: +k.V });
 
   /** Aplica um candle recebido à lista. Retorna 'update' | 'new' | 'ignore'. */
   function mergeCandle(candles, c, max) {
@@ -28,7 +29,8 @@
     constructor(opts) {
       this.symbol = opts.symbol; this.interval = opts.interval;
       this.onData = opts.onData; this.onStatus = opts.onStatus;
-      this.max = opts.max || 1000;
+      this.history = Math.min(20000, opts.history || 6000);
+      this.max = opts.max || this.history + 500;
       this.candles = [];
       this.stopped = true; this.ws = null; this.retry = 0; this.timers = [];
       this.lastMsg = 0;
@@ -47,13 +49,26 @@
       if (this.ws) { try { this.ws.close(); } catch (_) { /* ignora */ } this.ws = null; }
     }
 
+    // Histórico paginado (a Binance entrega até 1000 candles por chamada), do mais novo para o mais antigo
     async _history() {
-      const url = `${REST}?symbol=${this.symbol}&interval=${this.interval}&limit=${this.max > 1000 ? 1000 : this.max}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Binance respondeu HTTP ${res.status}`);
-      const rows = await res.json();
-      if (!Array.isArray(rows) || rows.length < 2) throw new Error('Resposta inesperada da Binance.');
-      return rows.map(fromRest);
+      const want = this.history;
+      let out = [], endTime = null;
+      while (out.length < want) {
+        const lim = Math.min(1000, want - out.length);
+        const url = `${REST}?symbol=${this.symbol}&interval=${this.interval}&limit=${lim}` + (endTime ? `&endTime=${endTime}` : '');
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`Binance respondeu HTTP ${res.status}`);
+        const rows = await res.json();
+        if (!Array.isArray(rows)) throw new Error('Resposta inesperada da Binance.');
+        if (!rows.length) break;
+        out = rows.map(fromRest).concat(out);
+        endTime = rows[0][0] - 1;
+        if (this.stopped) return out;
+        this.onStatus('loading', `${out.length}/${want}`);
+        if (rows.length < lim) break;
+      }
+      if (out.length < 2) throw new Error('Resposta inesperada da Binance.');
+      return out;
     }
 
     async _connect(first) {

@@ -129,3 +129,13 @@ textarea { width: 100%; background: var(--bg); color: var(--text); border: 1px s
 .alert-state.on { color: var(--up); } .alert-state.off { color: var(--muted); }
 .log { margin-top: 8px; font-size: 12.5px; color: var(--muted); }
 .log div { padding: 2px 0; }
+
+.alert-banner.none { background: var(--panel); border-color: var(--border); color: var(--muted); font-size: 13px; }
+.modelp { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.modelp b { color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.modelp { flex-wrap: wrap; }
+.gauge.mid { background: linear-gradient(90deg, var(--down), var(--border) 50%, var(--up)); }
+details.more { margin-top: 10px; font-size: 13px; }
+details.more summary { cursor: pointer; color: var(--accent); padding: 4px 0; }
+details.more h4 { margin: 12px 0 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+tr.gate td { font-weight: 600; background: color-mix(in srgb, var(--accent) 10%, transparent); }

@@ -154,11 +154,11 @@
 
   // Backtest walk-forward: o score no candle i é comparado ao retorno em i+H,
   // sem atravessar pregões (day trade não carrega posição).
-  function backtest(candles, ind, horizon, thresholds) {
+  function backtest(candles, ind, horizon, thresholds, from) {
     thresholds = thresholds || [0.25, 0.4, 0.6];
     const rows = thresholds.map(t => ({ threshold: t, n: 0, hits: 0, sumRet: 0 }));
     let baseN = 0, baseUp = 0;
-    for (let i = 0; i + horizon < candles.length; i++) {
+    for (let i = Math.max(0, from || 0); i + horizon < candles.length; i++) {
       if (I.sessionKey(candles[i].t) !== I.sessionKey(candles[i + horizon].t)) continue;
       const sc = scoreAt(candles, ind, i);
       if (!sc) continue;
@@ -185,6 +185,7 @@
     };
   }
 
+  const RECENT = 1500; // janela recente usada pelos cartões de indicadores (o modelo usa todo o histórico)
   const DEFAULTS = { horizon: 12, simulations: 2000, window: 300, driftFactor: 0.1, tpAtr: 1.5, slAtr: 1, seed: null };
 
   function analyze(candles, options) {
@@ -196,7 +197,7 @@
     if (!sc) throw new Error('Histórico insuficiente para calcular os indicadores.');
     const atrNow = ind.atr[n];
     const mc = monteCarlo(candles, sc.score, Object.assign({}, opts, { atr: atrNow }));
-    const sorted = I.swingLevels(candles, 3, atrNow * 0.5);
+    const sorted = I.swingLevels(candles.slice(-RECENT), 3, atrNow * 0.5);
     const last = candles[n].c;
     const supports = sorted.filter(l => l.price < last).sort((a, b) => b.price - a.price).slice(0, 3);
     const resistances = sorted.filter(l => l.price > last).sort((a, b) => a.price - b.price).slice(0, 3);
@@ -207,7 +208,7 @@
       forecast: mc,
       pivots: I.pivotPoints(candles),
       supports, resistances,
-      backtest: backtest(candles, ind, opts.horizon)
+      backtest: backtest(candles, ind, opts.horizon, null, candles.length - RECENT)
     };
   }
 

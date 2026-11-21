@@ -1,12 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const D = require('../js/data.js');
-const F = require('../js/forecast.js');
-const I = require('../js/indicators.js');
 const S = require('../js/sim.js');
 
-const candles = D.generateDemo({ days: 10, seed: 99 });
-const ind = I.computeAll(candles);
 const MIN = 300000;
 
 test('breakeven: payout 85% => ~54,1%', () => {
@@ -14,40 +9,35 @@ test('breakeven: payout 85% => ~54,1%', () => {
   assert.equal(S.breakeven(100), 0.5);
 });
 
-test('evaluateAlert: dispara só se todos os critérios passam', () => {
-  const a = F.analyze(candles, { seed: 1 });
-  const r = S.evaluateAlert(candles, a, {}, 85);
-  assert.equal(r.checks.length, 4);
-  assert.equal(r.fire, r.checks.every(c => c.ok));
-  // critérios impossíveis nunca disparam
-  const never = S.evaluateAlert(candles, a, { minScore: 0.99, minEffN: 1e6 }, 85);
-  assert.equal(never.fire, false);
-  // critérios frouxos + payout 100% disparam quando o sinal atual existe
-  const loose = S.evaluateAlert(candles, a, { minScore: 0.01, minModelP: 0, minEffN: 1, margin: -50 }, 100);
-  assert.equal(loose.fire, true);
+const research = (over) => Object.assign({ star: { n: 80, hitLow: 0.58, hitRate: 0.62 }, brierSkill: 0.01 }, over);
+
+test('evaluateAlert: dispara só com todos os critérios', () => {
+  const ok = S.evaluateAlert({ p: 0.60, research: research() }, {}, 85);
+  assert.equal(ok.fire, true); assert.equal(ok.side, 'up'); assert.equal(ok.checks.length, 4);
+  const down = S.evaluateAlert({ p: 0.38, research: research() }, {}, 85);
+  assert.equal(down.fire, true); assert.equal(down.side, 'down');
+  // cada critério, sozinho, derruba o alerta
+  assert.equal(S.evaluateAlert({ p: 0.60, research: research({ star: { n: 10, hitLow: 0.58 } }) }, {}, 85).fire, false); // amostra
+  assert.equal(S.evaluateAlert({ p: 0.60, research: research({ star: { n: 80, hitLow: 0.50 } }) }, {}, 85).fire, false); // limite inferior abaixo do empate
+  assert.equal(S.evaluateAlert({ p: 0.60, research: research({ brierSkill: -0.001 }) }, {}, 85).fire, false); // pior que o acaso
+  assert.equal(S.evaluateAlert({ p: 0.52, research: research() }, {}, 85).fire, false); // probabilidade abaixo do limiar
 });
 
-test('simulateHistory: contabilidade coerente e uma operação por vez', () => {
-  const r = S.simulateHistory(candles, ind, 12, { minScore: 0.3, minEffN: 5, margin: -10 }, 85, 10);
-  assert.ok(r.trades.length > 0);
-  const wins = r.trades.filter(t => t.result === 'win').length, losses = r.trades.filter(t => t.result === 'loss').length;
-  assert.equal(r.stats.pnl, Math.round((wins * 8.5 - losses * 10) * 100) / 100);
-  for (let i = 1; i < r.trades.length; i++) assert.ok(r.trades[i].t - r.trades[i - 1].t >= 12 * MIN);
+test('evaluateAlert: sem pesquisa ainda fica pendente e não dispara', () => {
+  const r = S.evaluateAlert({ p: 0.9, research: null }, {}, 85);
+  assert.equal(r.fire, false); assert.equal(r.pending, true);
 });
 
-test('simulateHistory é causal: alterar candles futuros não muda operações passadas', () => {
-  const cfg = { minScore: 0.3, minEffN: 3, margin: -20 };
-  const full = S.simulateHistory(candles, ind, 12, cfg, 85, 10);
-  assert.ok(full.trades.length >= 4, 'o teste precisa de operações para ser significativo');
-  // corte logo depois da 3ª operação: ela e as anteriores precisam permanecer idênticas
-  const k = candles.findIndex(c => c.t === full.trades[2].t) + 12;
-  const head = candles.slice(0, k + 1);
-  const mutated = candles.map((c, i) => (i > k ? Object.assign({}, c, { o: c.o * 1.2, h: c.h * 1.2, l: c.l * 1.2, c: c.c * 1.2 }) : c));
-  const b = S.simulateHistory(mutated, I.computeAll(mutated), 12, cfg, 85, 10);
-  const a = S.simulateHistory(head, I.computeAll(head), 12, cfg, 85, 10);
-  const early = t => t.t <= full.trades[2].t;
-  assert.deepEqual(a.trades.filter(early), full.trades.filter(early));
-  assert.deepEqual(b.trades.filter(early), full.trades.filter(early));
+test('evaluateAlert: payout maior baixa o ponto de empate e o limiar', () => {
+  const a = S.evaluateAlert({ p: 0.56, research: research() }, {}, 85), b = S.evaluateAlert({ p: 0.56, research: research() }, {}, 95);
+  assert.ok(b.tStar < a.tStar);
+});
+
+test('pnlTrades: contabilidade das operações fora da amostra', () => {
+  const tr = S.pnlTrades([{ i: 1, side: 'up', hit: true }, { i: 9, side: 'down', hit: false }, { i: 20, side: 'up', hit: true }], 10, 85);
+  assert.deepEqual(tr.map(t => t.pnl), [8.5, -10, 8.5]);
+  assert.equal(S.summarize(tr).pnl, 7);
+  assert.equal(S.summarize(tr).wins, 2);
 });
 
 const base = { price: 100, t: 1_000_000, stake: 10, payoutPct: 85, horizon: 3, intervalMs: 60000, symbol: 'BTCUSDT' };

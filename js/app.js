@@ -1,12 +1,12 @@
 (function () {
   'use strict';
-  const { Forecast, Data, Chart, Live, Sim } = window.Coldigo;
+  const { Forecast, Data, Chart, Live, Sim, Model, Indicators } = window.Coldigo;
   const $ = id => document.getElementById(id);
 
-  const params = { horizon: 12, simulations: 2000, window: 300, driftFactor: 0.1, tpAtr: 1.5, slAtr: 1, payout: 85 };
+  const params = { horizon: 12, simulations: 2000, window: 300, driftFactor: 0.1, tpAtr: 1.5, slAtr: 1, payout: 85, history: 6000, trainN: 2500 };
   const alertCfg = Object.assign({}, Sim.DEFAULT_CFG);
   const prefs = { stake: 10, auto: false, sound: true };
-  const state = { candles: [], analysis: null, source: '', live: null, liveLen: 0, alert: null, alertLog: [], bannerDismissed: null };
+  const state = { candles: [], analysis: null, source: '', live: null, liveLen: 0, alert: null, alertLog: [], bannerDismissed: null, research: null, pred: null, closedSince: 0 };
   const chart = new Chart($('chart'), $('tooltip'));
 
   const PART_LABELS = { trend: 'Tendência', vwap: 'VWAP', momentum: 'Momentum', rsi: 'RSI', bollinger: 'Bollinger' };
@@ -29,9 +29,11 @@
   };
   const saved = store.get() || {};
   let portfolio = new Sim.Portfolio(saved.portfolio);
+  let tests = Array.isArray(saved.tests) ? saved.tests : [];
   Object.assign(prefs, saved.prefs);
   Object.assign(alertCfg, saved.alertCfg);
-  function persist() { store.set({ portfolio, prefs, alertCfg }); }
+  Object.assign(params, saved.params);
+  function persist() { store.set({ portfolio, prefs, alertCfg, tests, params: { horizon: params.horizon, payout: params.payout, history: params.history, trainN: params.trainN } }); }
 
   function showError(msg) {
     const el = $('error');
@@ -42,21 +44,20 @@
     stopLive();
     try {
       state.candles = candles; state.source = source; state.liveLen = candles.length;
+      state.research = null; state.pred = null; state.alert = null;
       showError('');
-      analyze(true, 'silent');
+      analyze(true);
+      runResearch();
     } catch (e) {
       showError(e.message);
     }
   }
 
-  // alertMode: 'none' (tick), 'silent' (recalcula sem avisar), 'notify' (fechamento de candle ao vivo)
-  function analyze(resetView, alertMode) {
+  function analyze(resetView) {
     state.analysis = Forecast.analyze(state.candles, params);
     chart.setData(state.candles, state.analysis, resetView);
     renderMeta();
     renderMain();
-    if (alertMode === 'silent') refreshAlert(false);
-    else if (alertMode === 'notify') refreshAlert(true);
   }
 
   function renderMeta() {
@@ -78,36 +79,6 @@
     if (p.bollinger < -0.05) out.push('preço esticado acima da banda de Bollinger');
     if (p.bollinger > 0.05) out.push('preço esticado abaixo da banda de Bollinger');
     return out.length ? out.join('; ') + '.' : 'Sinais mistos: nenhum indicador domina.';
-  }
-
-  function binaryCard(a) {
-    const f = a.forecast, bt = a.backtest;
-    const payout = params.payout / 100, be = 1 / (1 + payout);
-    const mins = Math.round(f.horizon * a.stepMs / 60000);
-    const head = `<div class="card"><h3>Opção binária · expiração em ${f.horizon} candles (~${mins} min)</h3>`;
-    const rowBE = `<div class="row"><span>Ponto de empate (payout ${params.payout}%)</span><b>${pct(be)}</b></div>`;
-    if (a.bias === 'neutral') {
-      return head + rowBE + '<div class="verdict mid">Viés neutro: não há sinal para esta expiração.</div></div>';
-    }
-    const dirName = a.bias === 'up' ? 'ACIMA (CALL)' : 'ABAIXO (PUT)';
-    const modelP = a.bias === 'up' ? f.probUp : 1 - f.probUp;
-    const row = bt.rows.filter(r => r.threshold <= Math.abs(a.score)).pop();
-    let body = `<div class="row"><span>Direção do sinal</span><b>${dirName}</b></div>${rowBE}` +
-      `<div class="row"><span>Probabilidade do modelo</span><b>${pct(modelP)}</b></div>`;
-    let verdict;
-    if (!row || row.signals === 0) {
-      verdict = ['mid', 'Poucos sinais nesta força de score no histórico carregado.'];
-    } else {
-      body += `<div class="row"><span>Acerto histórico (score ≥ ${num(row.threshold)})</span><b>${pct(row.hitRate)}</b></div>` +
-        `<div class="row"><span>Limite inferior (95%)</span><b>${pct(row.hitLow)}</b></div>` +
-        `<div class="row"><span>Amostra</span><b>${row.signals} sinais (~${row.effectiveN} independentes)</b></div>`;
-      if (row.effectiveN < 30) verdict = ['mid', 'Amostra pequena: carregue mais histórico antes de confiar neste número.'];
-      else if (row.hitLow > be) verdict = ['good', 'No histórico, o acerto superou o ponto de empate com margem estatística. Não garante o futuro.'];
-      else if (row.hitRate > be) verdict = ['mid', 'O acerto passou do ponto de empate, mas a margem de erro ainda inclui prejuízo. Vantagem não comprovada.'];
-      else verdict = ['bad', 'No histórico, o acerto ficou abaixo do ponto de empate. Neste ativo e tempo gráfico o sinal perde dinheiro.'];
-    }
-    return head + body + `<div class="verdict ${verdict[0]}">${verdict[1]}</div>` +
-      '<p class="note" style="margin:8px 0 0">A "probabilidade do modelo" vem da simulação e do viés, sem validação. O que vale é o acerto histórico e seu limite inferior.</p></div>';
   }
 
   // Cartões de análise: refeitos a cada atualização (não contêm campos editáveis)
@@ -139,7 +110,7 @@
 
     $('sec-main').innerHTML = `
       <div class="card">
-        <h3>Viés para os próximos ${f.horizon} candles (~${horizonMin} min)</h3>
+        <h3>Viés por indicadores · referência, não validado</h3>
         <div class="bias ${a.bias}"><span class="label">${BIAS_TEXT[a.bias]}</span><b>${sgn(a.score)}</b></div>
         <div class="gauge"><i style="left:${pos}%"></i></div>
         <div class="legend"><span>−1 baixa</span><span style="margin-left:auto">+1 alta</span></div>
@@ -168,8 +139,6 @@
         ${a.bias === 'neutral' ? '<p class="note">Viés neutro: mostrando o lado comprado como referência.</p>' : ''}
       </div>
 
-      ${binaryCard(a)}
-
       <div class="card parts">
         <h3>Composição do score</h3>
         ${partsHtml}
@@ -183,7 +152,7 @@
       </div>
 
       <div class="card">
-        <h3>Backtest do sinal (horizonte ${f.horizon})</h3>
+        <h3>Backtest do score por indicadores (horizonte ${f.horizon})</h3>
         <table><thead><tr><th>Score</th><th>Sinais</th><th>Acerto</th><th>Retorno médio</th></tr></thead><tbody>${btRows}</tbody></table>
         <p class="note" style="margin:8px 0 0">Taxa de alta do período: ${bt.baseUpRate == null ? '–' : pct(bt.baseUpRate)} em ${bt.baseSamples} janelas (sobrepostas: os sinais não são independentes). ${verdict}</p>
       </div>`;
@@ -196,72 +165,130 @@
 
   // Parâmetros: desenhados uma única vez, para os campos não serem apagados pela atualização ao vivo
   function renderParams() {
+    const row = (id, label, attrs, val) => `<label for="${id}">${label}</label><input id="${id}" type="number" ${attrs} value="${val}">`;
     $('sec-params').innerHTML = `
       <div class="card">
-        <h3>Parâmetros</h3>
+        <h3>Operação</h3>
         <div class="params">
-          <label for="p-horizon">Horizonte / expiração (candles)</label><input id="p-horizon" type="number" min="3" max="60" value="${params.horizon}">
-          <label for="p-payout">Payout (%)</label><input id="p-payout" type="number" min="50" max="100" step="1" value="${params.payout}">
-          <label for="p-tp">Alvo (× ATR)</label><input id="p-tp" type="number" min="0.2" max="10" step="0.1" value="${params.tpAtr}">
-          <label for="p-sl">Stop (× ATR)</label><input id="p-sl" type="number" min="0.2" max="10" step="0.1" value="${params.slAtr}">
-          <label for="p-win">Janela de volatilidade</label><input id="p-win" type="number" min="30" max="2000" step="10" value="${params.window}">
-          <label for="p-drift">Peso do viés (drift)</label><input id="p-drift" type="number" min="0" max="1" step="0.05" value="${params.driftFactor}">
-          <label for="p-sims">Simulações</label><input id="p-sims" type="number" min="200" max="20000" step="200" value="${params.simulations}">
+          ${row('p-horizon', 'Expiração (candles)', 'min="3" max="60"', params.horizon)}
+          ${row('p-payout', 'Payout (%)', 'min="50" max="100" step="1"', params.payout)}
         </div>
-        <p class="note" id="p-note" style="margin-top:8px"></p>
       </div>
 
       <div class="card">
-        <h3>Critérios do alerta de sinal forte</h3>
+        <h3>Modelo e alerta</h3>
         <div class="params">
-          <label for="a-score">Força mínima do score</label><input id="a-score" type="number" min="0.1" max="1" step="0.05" value="${alertCfg.minScore}">
-          <label for="a-model">Prob. mínima do modelo (%)</label><input id="a-model" type="number" min="50" max="95" step="1" value="${Math.round(alertCfg.minModelP * 100)}">
-          <label for="a-effn">Amostra independente mínima</label><input id="a-effn" type="number" min="1" max="500" step="1" value="${alertCfg.minEffN}">
-          <label for="a-margin">Margem sobre o empate (p.p.)</label><input id="a-margin" type="number" min="-20" max="30" step="0.5" value="${alertCfg.margin}">
+          ${row('p-train', 'Janela de treino (candles)', 'min="800" max="8000" step="100"', params.trainN)}
+          ${row('p-history', 'Histórico ao vivo (candles)', 'min="3000" max="10000" step="500"', params.history)}
+          ${row('a-margin', 'Margem sobre o empate (p.p.)', 'min="0" max="10" step="0.5"', alertCfg.marginPct)}
+          ${row('a-minn', 'Operações independentes mínimas', 'min="10" max="500" step="5"', alertCfg.minN)}
         </div>
-        <p class="note" style="margin-top:8px">Quanto mais rígidos os critérios, menos alertas. Afrouxar para ver mais sinais aumenta a chance de falsos alertas.</p>
+        <p class="note" style="margin-top:8px">O histórico maior só vale na próxima vez que você ligar o modo Ao vivo. Cada combinação de par, tempo, expiração e margem que você testa aumenta a chance de achar um resultado bom por sorte, e a ferramenta compensa isso deixando o limite de confiança mais rígido.</p>
+      </div>
+
+      <div class="card">
+        <h3>Cone de projeção (indicadores)</h3>
+        <div class="params">
+          ${row('p-tp', 'Alvo (× ATR)', 'min="0.2" max="10" step="0.1"', params.tpAtr)}
+          ${row('p-sl', 'Stop (× ATR)', 'min="0.2" max="10" step="0.1"', params.slAtr)}
+          ${row('p-win', 'Janela de volatilidade', 'min="30" max="2000" step="10"', params.window)}
+          ${row('p-drift', 'Peso do viés (drift)', 'min="0" max="1" step="0.05"', params.driftFactor)}
+          ${row('p-sims', 'Simulações', 'min="200" max="20000" step="200"', params.simulations)}
+        </div>
+        <p class="note" id="p-note" style="margin-top:8px"></p>
       </div>`;
 
-    const bind = (id, apply, rerun) => $(id).addEventListener('change', e => {
+    // `research`: o campo muda o que o modelo avalia, então a validação é refeita
+    const bind = (id, apply, after) => $(id).addEventListener('change', e => {
       const v = parseFloat(e.target.value);
       if (!Number.isFinite(v)) return;
       apply(v);
       persist();
-      try { showError(''); rerun(); } catch (err) { showError(err.message); }
+      try { showError(''); after(); } catch (err) { showError(err.message); }
     });
-    const reanalyze = reset => () => { if (state.analysis) analyze(reset, 'silent'); };
-    const realert = () => { if (state.analysis) refreshAlert(false); };
-    bind('p-horizon', v => { params.horizon = Math.max(3, Math.min(60, Math.round(v))); }, reanalyze(true));
-    bind('p-payout', v => { params.payout = Math.max(50, Math.min(100, v)); }, reanalyze(false));
-    bind('p-tp', v => { params.tpAtr = v; }, reanalyze(false));
-    bind('p-sl', v => { params.slAtr = v; }, reanalyze(false));
-    bind('p-win', v => { params.window = Math.round(v); }, reanalyze(false));
-    bind('p-drift', v => { params.driftFactor = v; }, reanalyze(false));
-    bind('p-sims', v => { params.simulations = Math.max(200, Math.min(20000, Math.round(v))); }, reanalyze(false));
-    bind('a-score', v => { alertCfg.minScore = Math.max(0.1, Math.min(1, v)); }, realert);
-    bind('a-model', v => { alertCfg.minModelP = Math.max(50, Math.min(95, v)) / 100; }, realert);
-    bind('a-effn', v => { alertCfg.minEffN = Math.max(1, Math.round(v)); }, realert);
-    bind('a-margin', v => { alertCfg.margin = v; }, realert);
+    const reanalyze = (reset, research) => () => {
+      if (!state.analysis) return;
+      analyze(reset);
+      if (research) runResearch();
+    };
+    bind('p-horizon', v => { params.horizon = Math.max(3, Math.min(60, Math.round(v))); }, reanalyze(true, true));
+    bind('p-payout', v => { params.payout = Math.max(50, Math.min(100, v)); }, reanalyze(false, true));
+    bind('p-train', v => { params.trainN = Math.max(800, Math.min(8000, Math.round(v))); }, reanalyze(false, true));
+    bind('p-history', v => { params.history = Math.max(3000, Math.min(10000, Math.round(v))); }, () => {});
+    bind('a-margin', v => { alertCfg.marginPct = Math.max(0, Math.min(10, v)); }, reanalyze(false, true));
+    bind('a-minn', v => { alertCfg.minN = Math.max(10, Math.round(v)); }, reanalyze(false, true));
+    bind('p-tp', v => { params.tpAtr = v; }, reanalyze(false, false));
+    bind('p-sl', v => { params.slAtr = v; }, reanalyze(false, false));
+    bind('p-win', v => { params.window = Math.round(v); }, reanalyze(false, false));
+    bind('p-drift', v => { params.driftFactor = v; }, reanalyze(false, false));
+    bind('p-sims', v => { params.simulations = Math.max(200, Math.min(20000, Math.round(v))); }, reanalyze(false, false));
   }
 
-  // --- Alerta de sinal forte ---
+  // --- Pesquisa (validação fora da amostra) e decisão ---
   const CHECK_LABELS = {
-    score: ['Força do sinal (|score|)', (v, n) => `${num(v)} ≥ ${num(n)}`],
-    model: ['Probabilidade do modelo', (v, n) => `${pct(v)} ≥ ${pct(n)}`],
-    sample: ['Amostra histórica independente', (v, n) => `${v} ≥ ${n}`],
-    edge: ['Acerto histórico (limite inferior 95%) acima do empate', (v, n) => `${pct(v)} > ${pct(n)}`]
+    sample: ['Operações independentes validadas (fora da amostra)', c => `${c.value} ≥ ${c.need}`],
+    edge: ['Acerto: limite inferior de confiança acima do empate', c => `${pct(c.value)} > ${pct(c.need)}`],
+    skill: ['Modelo melhor que o acaso (escore de Brier)', c => `${c.value > 0 ? '+' : ''}${(c.value * 100).toFixed(2).replace('.', ',')}%`],
+    prob: ['Probabilidade atual acima do limiar de entrada', c => `${pct(c.value)} ≥ ${pct(c.need)}`]
+  };
+  const REASONS = {
+    sample: c => `poucos sinais independentes validados fora da amostra (${c.value} de ${c.need} necessários)`,
+    edge: c => `sem vantagem comprovada fora da amostra (limite inferior ${pct(c.value)} não passa do empate ${pct(c.need)})`,
+    skill: () => 'o modelo não supera o acaso fora da amostra',
+    prob: c => `probabilidade atual (${pct(c.value)}) abaixo do limiar de entrada (${pct(c.need)})`
   };
 
-  function refreshAlert(notify) {
-    const a = state.analysis;
-    if (!a) return;
-    const res = Sim.evaluateAlert(state.candles, a, alertCfg, params.payout);
-    const hist = Sim.simulateHistory(state.candles, a.ind, params.horizon, alertCfg, params.payout, prefs.stake);
-    const last = state.candles[state.candles.length - 1];
-    state.alert = { res, hist, candleT: last.t, price: last.c };
-    if (notify && res.fire) fireAlert(res, last);
-    renderAlertCard();
-    renderBanner();
+  // Configurações distintas pesquisadas na última semana (correção de múltiplos testes).
+  // `countTests` diz quantas haveria com esta; `registerTest` grava só depois de a validação rodar de fato.
+  const recentTests = () => tests.filter(t => Date.now() - t.ts < 7 * 864e5);
+  const countTests = key => recentTests().length + (recentTests().some(t => t.key === key) ? 0 : 1);
+  function registerTest(key) {
+    tests = recentTests();
+    if (!tests.some(t => t.key === key)) tests.push({ key, ts: Date.now() });
+    persist();
+  }
+
+  function runResearch() {
+    if (!state.analysis || !state.candles.length) return;
+    const key = `${state.live ? state.live.symbol + '|' + state.live.interval : state.source}|H${params.horizon}|M${alertCfg.marginPct}`;
+    const k = countTests(key), z = Model.zForTests(k);
+    state.research = { status: 'running', key, k, z, n: state.candles.length };
+    state.closedSince = 0;
+    renderDecision();
+    setTimeout(() => {
+      try {
+        const t0 = performance.now();
+        const wf = Model.walkForward(state.candles, Indicators.computeAll(state.candles), params.horizon, { trainN: params.trainN });
+        if (wf.insufficient) {
+          state.research = { status: 'insufficient', key, k, z, n: state.candles.length, needed: wf.needed };
+        } else {
+          registerTest(key);
+          const ev = Model.evaluate(wf.preds, params.horizon, params.payout, { marginPct: alertCfg.marginPct, minN: alertCfg.minN, z });
+          state.research = { status: 'done', key, k, z, n: state.candles.length, ev, fits: wf.fits, hasTakerFlow: wf.hasTakerFlow, ms: Math.round(performance.now() - t0), at: Date.now() };
+        }
+        refreshPrediction(lastClosedIndex(), false);
+      } catch (e) { state.research = { status: 'error', message: e.message }; showError(e.message); renderDecision(); }
+    }, 30);
+  }
+
+  function lastClosedIndex() {
+    const n = state.candles.length;
+    if (!state.live) return n - 1;
+    return state.candles[n - 1].t + state.live.intervalMs <= Date.now() + 1500 ? n - 1 : n - 2;
+  }
+
+  // Treina com tudo o que já era conhecido no candle m e prevê a direção a partir dele
+  function refreshPrediction(m, notify) {
+    const r = state.research;
+    if (!r || r.status !== 'done' || m < 0) { renderDecision(); return; }
+    const c = state.candles, H = params.horizon;
+    const { X } = Model.buildFeatures(c, Indicators.computeAll(c));
+    const model = Model.fitLatest(c, X, Model.labels(c, H), H, { trainN: params.trainN }, m);
+    state.pred = model && X[m] ? { p: Model.predictProb(model, X[m]), t: c[m].t, idx: m } : null;
+    const res = state.pred ? Sim.evaluateAlert({ p: state.pred.p, research: r.ev }, alertCfg, params.payout) : null;
+    state.alert = res && { res, candleT: c[m].t };
+    if (notify && res && res.fire) fireAlert(res, c[m]);
+    renderDecision();
   }
 
   function fireAlert(res, last) {
@@ -276,41 +303,84 @@
     if (prefs.sound) { beep(); try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (_) { /* ignora */ } }
   }
 
-  function renderAlertCard() {
-    const al = state.alert;
-    if (!al) { $('sec-alert').innerHTML = ''; return; }
-    const { res, hist } = al, st = hist.stats;
-    const checks = res.checks.map(c => {
-      const [label, fmt] = CHECK_LABELS[c.key];
-      const val = c.value == null ? '–' : fmt(c.value, c.need);
-      return `<li><span class="${c.ok ? 'ok' : 'no'}">${c.ok ? '✓' : '✗'}</span><span>${label}</span><span class="val">${val}</span></li>`;
-    }).join('');
-    const histTxt = st.trades === 0
-      ? 'Nenhuma operação teria sido feita com esta regra nos candles carregados.'
-      : `Seguindo esta regra nos candles carregados: ${st.trades} operações, acerto ${pct(st.winRate)}, resultado ${smoney(st.pnl)} (valor ${money(prefs.stake)}), maior queda ${money(st.maxDrawdown)}.` +
-        (st.trades < 30 ? ' Poucas operações: este resultado não prova nada.' : '');
-    const log = state.alertLog.length
-      ? '<div class="log"><b>Últimos alertas</b>' + state.alertLog.map(l => `<div>${hhmm(l.t)} · ${SIDE_TXT[l.side]} · ${l.label}${l.auto ? ' · entrada simulada' : ''}</div>`).join('') + '</div>' : '';
-    $('sec-alert').innerHTML = `
-      <div class="card alert-card ${res.fire ? 'firing' : ''}">
-        <h3>Alerta de sinal forte</h3>
-        <div class="alert-state ${res.fire ? 'on' : 'off'}">${res.fire ? `${SIDE_TXT[res.side]} · todos os critérios atendidos` : 'Sem sinal forte agora'}</div>
-        <ul class="checks">${checks}</ul>
-        <p class="note" style="margin:8px 0 0">Avaliado ${state.live ? 'no fechamento do candle, às ' + hhmm(al.candleT + state.live.intervalMs) : 'no último candle carregado'}. O alerta só dispara quando <b>todos</b> os critérios passam, e mesmo assim cada operação pode perder.</p>
-        <p class="note" style="margin:6px 0 0">${histTxt}</p>
-        ${log}
-      </div>`;
+  function decisionState() {
+    const r = state.research, al = state.alert;
+    if (!r || r.status === 'running') return { kind: 'wait', text: `Validando o modelo em ${state.candles.length} candles…` };
+    if (r.status === 'insufficient') return { kind: 'none', text: `NÃO OPERAR · dados insuficientes para validar o modelo (precisa de ${r.needed} candles, há ${r.n}). No modo Ao vivo o histórico é carregado automaticamente.` };
+    if (r.status === 'error') return { kind: 'none', text: 'NÃO OPERAR · erro ao validar o modelo: ' + r.message };
+    if (!al) return { kind: 'wait', text: 'Aguardando o candle fechar para prever.' };
+    if (al.res.fire) return { kind: al.res.side === 'down' ? 'put' : 'call', text: null };
+    const failed = al.res.checks.find(c => !c.ok);
+    return { kind: 'none', text: `NÃO OPERAR · ${failed ? REASONS[failed.key](failed) : 'sem sinal'}` };
   }
 
+  function renderDecision() { renderBanner(); renderDecisionCard(); }
+
   function renderBanner() {
-    const el = $('alert-banner'), al = state.alert;
-    if (!al || !al.res.fire || state.bannerDismissed === al.candleT) { el.hidden = true; return; }
-    const { res } = al, mins = Math.round(res.horizon * (state.analysis.stepMs / 60000));
-    el.className = 'alert-banner ' + (res.side === 'down' ? 'put' : '');
+    const el = $('alert-banner'), d = decisionState(), al = state.alert;
+    if (d.kind === 'call' || d.kind === 'put') {
+      if (state.bannerDismissed === al.candleT) { el.hidden = true; return; }
+      const { res } = al, mins = Math.round(params.horizon * (state.analysis.stepMs / 60000));
+      el.className = 'alert-banner ' + (d.kind === 'put' ? 'put' : '');
+      el.innerHTML = `<span class="grow"><b>SINAL VALIDADO · ${SIDE_TXT[res.side]}</b> · probabilidade ${pct(res.pDir)} · expiração em ${params.horizon} candles (~${mins} min)</span>` +
+        (state.live ? `<button class="btn small primary" data-act="enter" data-side="${res.side}">Simular entrada</button>` : '') +
+        '<button class="btn small" data-act="dismiss">Dispensar</button>';
+    } else {
+      el.className = 'alert-banner none';
+      el.innerHTML = `<span class="grow">${d.text}</span>`;
+    }
     el.hidden = false;
-    el.innerHTML = `<span class="grow"><b>SINAL FORTE · ${SIDE_TXT[res.side]}</b> · expiração em ${res.horizon} candles (~${mins} min) · avaliado às ${hhmm(al.candleT + (state.live ? state.live.intervalMs : 0))}</span>` +
-      (state.live ? `<button class="btn small primary" data-act="enter" data-side="${res.side}">Simular entrada</button>` : '') +
-      '<button class="btn small" data-act="dismiss">Dispensar</button>';
+  }
+
+  function renderDecisionCard() {
+    const r = state.research, al = state.alert, d = decisionState();
+    if (!r) { $('sec-alert').innerHTML = ''; return; }
+    let body = '';
+    if (r.status === 'done' && al) {
+      const pUp = state.pred.p;
+      const checks = al.res.checks.map(c => {
+        const [label, fmt] = CHECK_LABELS[c.key];
+        return `<li><span class="${c.ok ? 'ok' : 'no'}">${c.ok ? '✓' : '✗'}</span><span>${label}</span><span class="val">${c.value == null ? '–' : fmt(c)}</span></li>`;
+      }).join('');
+      const ev = r.ev, star = ev.star;
+      const pos = Math.min(100, Math.max(0, (pUp - 0.4) / 0.2 * 100));
+      const trades = Sim.pnlTrades(star.trades, prefs.stake, params.payout), st = Sim.summarize(trades);
+      const stratRows = ev.strategies.map(s => `<tr${Math.abs(s.threshold - ev.tStar) < 1e-9 ? ' class="gate"' : ''}><td>${pct(s.threshold)}${Math.abs(s.threshold - ev.tStar) < 1e-9 ? ' ★' : ''}</td><td>${s.n}</td><td>${pct(s.hitRate)}</td><td>${pct(s.hitLow)}</td><td>${s.evPerUnit == null ? '–' : smoney(Math.round(s.evPerUnit * 10000) / 100)}</td></tr>`).join('');
+      const calRows = ev.calibration.map((g, i) => `<tr><td>${i + 1}º</td><td>${g.n}</td><td>${pct(g.meanP)}</td><td>${pct(g.freq)}</td></tr>`).join('');
+      body = `
+        <div class="modelp"><span>Modelo no fechamento das ${hhmm(state.pred.t + (state.live ? state.live.intervalMs : 0))}</span>
+          <b>▲ ${pct(pUp)} &nbsp; ▼ ${pct(1 - pUp)}</b></div>
+        <div class="gauge mid"><i style="left:${pos}%"></i></div>
+        <ul class="checks">${checks}</ul>
+        <p class="note" style="margin:8px 0 0">Tudo é medido <b>fora da amostra</b>: o modelo prevê candles que ele não viu no treino. Limiar de entrada ${pct(ev.tStar)} (empate ${pct(ev.breakeven)} + margem), definido antes de olhar os resultados.</p>
+        <p class="note" style="margin:6px 0 0">${st.trades === 0 ? 'Fora da amostra, a regra não teria feito nenhuma operação.' :
+          `Fora da amostra, a regra teria feito ${st.trades} operações (sem sobreposição): acerto ${pct(st.winRate)}, resultado ${smoney(st.pnl)} com ${money(prefs.stake)} por operação, maior queda ${money(st.maxDrawdown)}.`}</p>
+        <details class="more"><summary>Detalhes da validação</summary>
+          <div class="row"><span>Candles avaliados fora da amostra</span><b>${ev.n}</b></div>
+          <div class="row"><span>Taxa de alta no período</span><b>${pct(ev.base)}</b></div>
+          <div class="row"><span>Acerto geral (p ≥ 50%)</span><b>${pct(ev.accuracy)}</b></div>
+          <div class="row"><span>AUC (0,50 = acaso)</span><b>${ev.auc == null ? '–' : num(ev.auc, 3)}</b></div>
+          <div class="row"><span>Ganho sobre o acaso (Brier)</span><b>${ev.brierSkill == null ? '–' : (ev.brierSkill * 100).toFixed(2).replace('.', ',') + '%'}</b></div>
+          <div class="row"><span>Retreinos (janela ${params.trainN})</span><b>${r.fits}</b></div>
+          <div class="row"><span>Fluxo de ordens (taker buy)</span><b>${r.hasTakerFlow ? 'usado' : 'indisponível neste dado'}</b></div>
+          <h4>Estratégia por limiar de probabilidade</h4>
+          <table><thead><tr><th>Limiar</th><th>Operações</th><th>Acerto</th><th>Lim. inf.</th><th>Por operação</th></tr></thead><tbody>${stratRows}</tbody></table>
+          <h4>Calibração (do menor ao maior p)</h4>
+          <table><thead><tr><th>Grupo</th><th>n</th><th>p médio</th><th>Real</th></tr></thead><tbody>${calRows}</tbody></table>
+          <p class="note" style="margin:8px 0 0">Só a linha ★ vale como teste. As demais são informativas: escolher o melhor limiar depois de ver os resultados infla o acerto. Você pesquisou <b>${r.k}</b> configuração(ões) na última semana, então o limite de confiança usa z = ${num(r.z, 2)} (em vez de 1,96).</p>
+        </details>`;
+    }
+    const log = state.alertLog.length
+      ? '<div class="log"><b>Últimos alertas</b>' + state.alertLog.map(l => `<div>${hhmm(l.t)} · ${SIDE_TXT[l.side]} · ${l.label}${l.auto ? ' · entrada simulada' : ''}</div>`).join('') + '</div>' : '';
+    const head = d.kind === 'call' || d.kind === 'put' ? `${SIDE_TXT[al.res.side]} · sinal validado`
+      : d.kind === 'wait' ? 'Validando…' : 'Sem sinal validado agora';
+    $('sec-alert').innerHTML = `
+      <div class="card alert-card ${d.kind === 'call' || d.kind === 'put' ? 'firing' : ''}">
+        <h3>Decisão e validação do modelo</h3>
+        <div class="alert-state ${d.kind === 'call' || d.kind === 'put' ? 'on' : 'off'}">${head}</div>
+        ${d.kind === 'none' || d.kind === 'wait' ? `<p class="note" style="margin:6px 0 0">${d.text || ''}</p>` : ''}
+        ${body}${log}
+      </div>`;
   }
 
   $('alert-banner').addEventListener('click', e => {
@@ -399,7 +469,7 @@
   $('sim-sound').checked = !!prefs.sound;
   $('sim-stake').addEventListener('change', e => {
     const v = parseFloat(e.target.value);
-    if (Number.isFinite(v) && v > 0) { prefs.stake = v; persist(); if (state.analysis) refreshAlert(false); } else e.target.value = prefs.stake;
+    if (Number.isFinite(v) && v > 0) { prefs.stake = v; persist(); renderDecision(); } else e.target.value = prefs.stake;
   });
   $('sim-auto').addEventListener('change', e => { prefs.auto = e.target.checked; persist(); if (prefs.auto) ensureAudio(); });
   $('sim-sound').addEventListener('change', e => { prefs.sound = e.target.checked; persist(); if (prefs.sound) ensureAudio(); });
@@ -426,6 +496,7 @@
     pill.hidden = kind === 'idle';
     pill.className = 'pill ' + (kind === 'live' ? 'live' : kind === 'error' ? 'error' : 'warn');
     if (kind === 'connecting') pill.textContent = 'conectando…';
+    else if (kind === 'loading') pill.textContent = `carregando histórico ${msg}`;
     else if (kind === 'reconnecting') pill.textContent = 'reconectando…';
     else if (kind === 'error') pill.textContent = msg || 'erro';
     else tickCountdown();
@@ -448,7 +519,13 @@
     const following = chart.view.start + chart.view.count - H >= state.liveLen - 1.5;
     if (following) chart.view.start += n - state.liveLen;
     state.liveLen = n;
-    try { analyze(false, closed ? 'notify' : 'none'); } catch (e) { showError(e.message); }
+    try {
+      analyze(false);
+      if (closed) {
+        refreshPrediction(n - 1, true);
+        if (++state.closedSince >= 120) runResearch(); // revalida o modelo com dados novos
+      }
+    } catch (e) { showError(e.message); }
   }
 
   function onLiveData(candles, info) {
@@ -457,7 +534,7 @@
     settleNow();
     if (info.reset) {
       state.liveLen = candles.length; showError('');
-      try { analyze(true, 'silent'); } catch (e) { showError(e.message); }
+      try { analyze(true); runResearch(); } catch (e) { showError(e.message); }
       lastRun = Date.now(); syncMarkers(); renderSim(); return;
     }
     // reanalisa no máximo 1x por segundo, e na hora ao fechar um candle (é quando o alerta é avaliado)
@@ -470,8 +547,8 @@
   function startLive() {
     stopLive();
     ensureAudio(); lockScreen();
-    state.alertLog = []; state.alert = null; state.bannerDismissed = null;
-    state.live = new Live.LiveFeed({ symbol: symSel.value, interval: intSel.value, onData: onLiveData, onStatus: setStatus });
+    state.alertLog = []; state.alert = null; state.bannerDismissed = null; state.research = null; state.pred = null;
+    state.live = new Live.LiveFeed({ symbol: symSel.value, interval: intSel.value, history: params.history, onData: onLiveData, onStatus: setStatus });
     liveBtn.classList.add('on'); liveBtn.setAttribute('aria-pressed', 'true');
     countdownTimer = setInterval(tick, 1000);
     state.live.start();
