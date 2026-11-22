@@ -15,7 +15,7 @@ npm test             # testes unitários (Node 18+)
 
 ### Modo ao vivo (Binance)
 
-O botão **Ao vivo** busca o histórico e acompanha o preço em tempo real pelo feed público da Binance (sem chave), com reconexão automática. Pares: BTC, ETH, BNB, SOL, XRP e DOGE contra USDT, em 1, 3, 5 e 15 minutos. Carrega até 6.000 candles de histórico (configurável) para treinar e validar o modelo. A análise é refeita a cada segundo e imediatamente quando um candle fecha; o candle em formação ainda pode mudar, então o sinal oscila até ele fechar.
+O botão **Ao vivo** busca o histórico e acompanha o preço em tempo real pelo feed público da Binance (sem chave), com reconexão automática. Ativos: **cripto** (BTC, ETH, BNB, SOL, XRP, DOGE), **câmbio** (EUR/USD, GBP/USD, AUD/USD, USD/JPY, USD/BRL, USD/TRY) e **ouro** (XAU/USD), em 1, 3, 5 e 15 minutos. Câmbio e ouro vêm de pares contra USDT da Binance (por exemplo EURUSDT), que acompanham o ativo real mas **não são o mesmo feed da sua corretora**, operam 24h (inclusive fim de semana) e têm preços cotados em passos pequenos (EURUSDT anda de 0,0001 em 0,0001, o que gera muitos empates). Ao abrir, o app confere quais desses pares a Binance ainda lista e esconde os inativos. O app mostra um aviso quando o ativo é uma referência. Carrega até 6.000 candles de histórico (configurável) para treinar e validar o modelo. A análise é refeita a cada segundo e imediatamente quando um candle fecha; o candle em formação ainda pode mudar, então o sinal oscila até ele fechar.
 
 - A **Quotex não tem API pública**, então a ferramenta não lê preços de dentro dela. Em ativos OTC a corretora gera os próprios preços, e nenhuma análise de mercado se aplica a eles.
 - O modo ao vivo precisa de uma página com acesso à internet aberta: `npm start` ou uma hospedagem estática (por exemplo o GitHub Pages, em Settings → Pages → Deploy from branch → `master`, depois de mergear). A cópia publicada como artefato do Claude bloqueia conexões externas e esconde esses controles.
@@ -41,6 +41,8 @@ Verificado em dados sintéticos: com um sinal real plantado o modelo o encontra 
 ### Simulador de operações
 
 Carteira fictícia (R$ 1.000 iniciais) de opções binárias, no modo ao vivo: **CALL** (acima) ou **PUT** (abaixo), valor por operação, payout e expiração configuráveis. A operação entra ao preço atual e é liquidada no vencimento (vitória paga o payout, derrota perde o valor, empate devolve). Há opção de entrar automaticamente nos alertas. Entradas aparecem como triângulos no gráfico e o saldo, as operações e as preferências ficam salvos no navegador. O acerto só significa algo com muitas operações (100 ou mais) e deve ser comparado com o ponto de empate. Operar no simulador em tempo real é o teste fora da amostra que o backtest não consegue ser.
+
+Para o câmbio real (feed da corretora ou do MetaTrader), exporte o histórico em CSV e carregue pelo botão **Carregar CSV**: o modelo valida do mesmo jeito, só que sem o fluxo de ordens, que o CSV não traz.
 
 ### Formato dos dados
 
