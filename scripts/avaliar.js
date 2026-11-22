@@ -1,5 +1,6 @@
 // Avaliação walk-forward do modelo em dados reais baixados por scripts/baixar-historico.js.
-// Uso: node scripts/avaliar.js pasta-com-os-dados
+// Uso: node scripts/avaliar.js pasta-com-os-dados [plano]
+// plano: lista tempo:expiração separada por vírgula (padrão 1m:5,5m:3). Ex.: 5m:6,15m:2,1h:1
 // O protocolo (ativos, tempos, expirações, payout, margem) é fixado AQUI, antes de ver resultados.
 // Cada ativo x tempo é um teste; o limite de confiança é corrigido para o total de testes.
 const fs = require('fs'), path = require('path');
@@ -7,14 +8,13 @@ const R = path.join(__dirname, '..', 'js') + path.sep;
 const I = require(R + 'indicators.js'), L = require(R + 'live.js'), M = require(R + 'model.js');
 const dir = process.argv[2];
 const SYMS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT', 'EURUSDT', 'PAXGUSDT'];
-const PLAN = { '1m': 5, '5m': 3 }, PAYOUT = 85;
-const K = SYMS.length * Object.keys(PLAN).length, zK = M.zForTests(K);
-console.log(`Testes pré-registrados: ${K} | z corrigido = ${zK.toFixed(3)} (sem correção seria 1,960) | payout ${PAYOUT}% => empate ${(100 / 1.85).toFixed(1)}% | margem 1 p.p. | minN 30\n`);
+const PLAN = (process.argv[3] || '1m:5,5m:3').split(',').map(x => { const [iv, h] = x.split(':'); return [iv, +h]; }), PAYOUT = 85;
+const K = SYMS.length * PLAN.length, zK = M.zForTests(K);
+console.log(`Plano: ${PLAN.map(([iv, h]) => iv + ' x' + h).join(', ')}\nTestes pré-registrados: ${K} | z corrigido = ${zK.toFixed(3)} (sem correção seria 1,960) | payout ${PAYOUT}% => empate ${(100 / 1.85).toFixed(1)}% | margem 1 p.p. | minN 30\n`);
 const pct = x => x == null ? '   –  ' : (100 * x).toFixed(1).padStart(5) + '%';
 console.log('ativo     tempo H  | OOS n | taxa alta | acerto  AUC   skill(Brier) | sinais indep. acerto  lim.inf.(z corr.) | validado  (sem correção)');
 const rows = [];
-for (const sym of SYMS) for (const iv of Object.keys(PLAN)) {
-  const H = PLAN[iv];
+for (const sym of SYMS) for (const [iv, H] of PLAN) {
   const raw = JSON.parse(fs.readFileSync(path.join(dir, `${sym}_${iv}.json`), 'utf8'));
   const c = raw.map(L.fromRest);
   const flat = c.filter(k => k.c === k.o).length / c.length;
