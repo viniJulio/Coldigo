@@ -53,6 +53,16 @@
   /** z do limite inferior unilateral de 97,5%, corrigido (Bonferroni) para k configurações testadas. */
   function zForTests(k) { return normQuantile(1 - 0.025 / Math.max(1, k)); }
 
+  /** Qualidade do preço: parcela de candles que fecham exatamente onde abriram. Em dados cotados em
+   *  passos grandes (EUR/USDT anda de 0,0001 em 0,0001) o "quique" entre dois preços vizinhos gera
+   *  padrões de reversão que parecem vantagem e são artefato do feed (medido: 28% a 50% no EUR/USDT;
+   *  no máximo ~12% nos demais ativos testados). */
+  const QUANTIZED_LIMIT = 0.20;
+  function quantization(candles) {
+    const share = candles.length ? candles.filter(k => k.c === k.o).length / candles.length : 0;
+    return { flatShare: share, quantized: share >= QUANTIZED_LIMIT };
+  }
+
   // ---------- Features ----------
   function buildFeatures(candles, ind) {
     const n = candles.length, d = FEATURES.length;
@@ -296,7 +306,7 @@
 
   const api = {
     FEATURES, WARM, DEFAULTS, buildFeatures, labels, fitLogistic, predictProb, fitLatest, walkForward,
-    evaluate, strategy, auc, normQuantile, wilsonLower, zForTests, solve
+    evaluate, strategy, auc, normQuantile, wilsonLower, zForTests, solve, quantization, QUANTIZED_LIMIT
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Coldigo = Object.assign(root.Coldigo || {}, { Model: api });

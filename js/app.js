@@ -261,6 +261,13 @@
     const k = countTests(key), z = Model.zForTests(k);
     state.research = { status: 'running', key, k, z, n: state.candles.length };
     state.closedSince = 0;
+    const q = Model.quantization(state.candles);
+    if (q.quantized) { // preço em passos grandes: padrões de curtíssimo prazo costumam ser artefato do feed
+      state.research = { status: 'quantized', key, k, z, n: state.candles.length, flatShare: q.flatShare };
+      state.pred = null; state.alert = null;
+      renderDecision();
+      return;
+    }
     renderDecision();
     setTimeout(() => {
       try {
@@ -314,6 +321,7 @@
     const r = state.research, al = state.alert;
     if (!r || r.status === 'running') return { kind: 'wait', text: `Validando o modelo em ${state.candles.length} candles…` };
     if (r.status === 'insufficient') return { kind: 'none', text: `NÃO OPERAR · dados insuficientes para validar o modelo (precisa de ${r.needed} candles, há ${r.n}). No modo Ao vivo o histórico é carregado automaticamente.` };
+    if (r.status === 'quantized') return { kind: 'none', text: `NÃO OPERAR · preço muito quantizado: ${(r.flatShare * 100).toFixed(0)}% dos candles fecham no mesmo preço em que abrem. Nesse tipo de dado, padrões de curtíssimo prazo costumam ser artefato do passo de preço do feed, não uma vantagem que exista na sua corretora. Use o histórico do feed da própria corretora (CSV) ou um tempo gráfico maior.` };
     if (r.status === 'error') return { kind: 'none', text: 'NÃO OPERAR · erro ao validar o modelo: ' + r.message };
     if (!al) return { kind: 'wait', text: 'Aguardando o candle fechar para prever.' };
     if (al.res.fire) return { kind: al.res.side === 'down' ? 'put' : 'call', text: null };

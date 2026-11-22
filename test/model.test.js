@@ -120,3 +120,13 @@ test('correção de múltiplos testes torna o gate mais rígido', () => {
   const k20 = M.evaluate(preds, 3, 85, { z: M.zForTests(20), minN: 30 });
   assert.ok(k20.star.hitLow < k1.star.hitLow);
 });
+
+test('quantization: separa preço em passos grandes de preço contínuo', () => {
+  const smooth = series(500, 3, 0);
+  assert.equal(M.quantization(smooth).quantized, false);
+  // mesma série cotada em passos de 0,25% do preço: muitos candles "parados"
+  const step = smooth.map(k => { const q = x => Math.round(x / 0.25) * 0.25; return Object.assign({}, k, { o: q(k.o), c: q(k.c) }); });
+  const r = M.quantization(step);
+  assert.ok(r.flatShare > 0.2 && r.quantized, 'flatShare ' + r.flatShare);
+  assert.equal(M.quantization([]).quantized, false);
+});

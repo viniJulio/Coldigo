@@ -38,6 +38,17 @@ O cartão **Decisão e validação do modelo** mostra o que passou ou falhou, o 
 
 Verificado em dados sintéticos: com um sinal real plantado o modelo o encontra (AUC ~0,58 com sinal fraco) e, em 120 passeios aleatórios, **nenhum** foi validado. **Em dados reais de cripto de 1 a 15 minutos é esperado que o resultado seja "sem vantagem comprovada" na maior parte do tempo.** Isso é a ferramenta funcionando, não falhando.
 
+### Resultados com dados reais (22/11/2026)
+
+Avaliação walk-forward com dados reais da Binance, protocolo fixado antes de ver resultados: 8 ativos (BTC, ETH, BNB, SOL, XRP, DOGE, EUR/USDT, PAXG) × 2 tempos (1 min com expiração de 5 candles; 5 min com 3 candles) = 16 testes, payout 85%, ~7 mil candles fora da amostra cada, limite de confiança corrigido para 16 testes (z = 2,95).
+
+- **15 de 16 sem vantagem.** AUC médio 0,51 (0,50 = acaso), acerto de sinais fortes entre 49% e 54%, abaixo do ponto de empate (54,1%). O modelo piora o escore de Brier em 15 dos 16 (previsões superconfiantes), então o gate bloqueia.
+- **1 passou, e era artefato:** EUR/USDT em 1 min (acerto 59,4%, limite inferior 54,9%). Uma regra sem modelo nenhum ("apostar contra o último movimento") acerta 59,7% nesse mesmo dado: é o "quique" entre os preços vizinhos de um ativo cotado em passos de 0,0001 (50% dos candles ficam parados). Não é vantagem que exista no feed da corretora, e o acerto foi instável (54% nos primeiros dias, 88% no último).
+- **Proteção criada depois:** se 20% ou mais dos candles fecham no preço em que abriram, o app bloqueia o alerta e explica o motivo. A regra foi criada *depois* de ver esse resultado, mas por um diagnóstico com linha de base, e nenhum outro ativo é afetado (máximo medido fora o EUR: 12%).
+- **Para refazer** com dados novos: `node scripts/baixar-historico.js pasta` e `npm run avaliar -- pasta`.
+
+Conclusão prática: nestes dados, em 1 a 5 minutos, o modelo não achou vantagem real. Qualquer mudança no modelo a partir daqui precisa ser validada em dados **posteriores** a esta avaliação (por exemplo, no simulador em tempo real), senão vira ajuste ao que já foi visto.
+
 ### Simulador de operações
 
 Carteira fictícia (R$ 1.000 iniciais) de opções binárias, no modo ao vivo: **CALL** (acima) ou **PUT** (abaixo), valor por operação, payout e expiração configuráveis. A operação entra ao preço atual e é liquidada no vencimento (vitória paga o payout, derrota perde o valor, empate devolve). Há opção de entrar automaticamente nos alertas. Entradas aparecem como triângulos no gráfico e o saldo, as operações e as preferências ficam salvos no navegador. O acerto só significa algo com muitas operações (100 ou mais) e deve ser comparado com o ponto de empate. Operar no simulador em tempo real é o teste fora da amostra que o backtest não consegue ser.
