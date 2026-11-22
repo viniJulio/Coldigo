@@ -53,3 +53,26 @@ test('LiveFeed pagina o histórico até o total pedido, em ordem cronológica', 
   assert.ok(out.every((c, i) => i === 0 || c.t - out[i - 1].t === MIN));
   delete global.fetch;
 });
+
+test('catálogo: rótulos, casas decimais e símbolos únicos', () => {
+  assert.equal(L.label('EURUSDT'), 'EUR/USD');
+  assert.equal(L.label('BTCUSDT'), 'BTC/USDT');
+  assert.equal(L.label('ABCUSDT'), 'ABC/USDT');
+  assert.equal(L.asset('EURUSDT').dec, 4);
+  assert.equal(new Set(L.SYMBOLS).size, L.SYMBOLS.length);
+  assert.ok(L.ASSETS.filter(a => a.proxy).every(a => a.verify));
+});
+
+test('checkAvailability: ativo, inexistente, parado e rede fora', async () => {
+  const now = Date.now();
+  global.fetch = async url => {
+    const sym = new URL(url).searchParams.get('symbol');
+    if (sym === 'GBPUSDT') return { status: 400, ok: false, json: async () => ({}) };            // não existe mais
+    if (sym === 'AUDUSDT') return { status: 200, ok: true, json: async () => [[now - 30 * 86400000]] }; // parado há 30 dias
+    if (sym === 'USDTTRY') throw new Error('rede');
+    return { status: 200, ok: true, json: async () => [[now - 60000]] };
+  };
+  const r = await L.checkAvailability(['EURUSDT', 'GBPUSDT', 'AUDUSDT', 'USDTTRY']);
+  assert.deepEqual(r, { EURUSDT: true, GBPUSDT: false, AUDUSDT: false, USDTTRY: null });
+  delete global.fetch;
+});

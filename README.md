@@ -15,7 +15,7 @@ npm test             # testes unitários (Node 18+)
 
 ### Modo ao vivo (Binance)
 
-O botão **Ao vivo** busca o histórico e acompanha o preço em tempo real pelo feed público da Binance (sem chave), com reconexão automática. Pares: BTC, ETH, BNB, SOL, XRP e DOGE contra USDT, em 1, 3, 5 e 15 minutos. Carrega até 6.000 candles de histórico (configurável) para treinar e validar o modelo. A análise é refeita a cada segundo e imediatamente quando um candle fecha; o candle em formação ainda pode mudar, então o sinal oscila até ele fechar.
+O botão **Ao vivo** busca o histórico e acompanha o preço em tempo real pelo feed público da Binance (sem chave), com reconexão automática. Ativos: **cripto** (BTC, ETH, BNB, SOL, XRP, DOGE), **câmbio** (EUR/USD, GBP/USD, AUD/USD, USD/JPY, USD/BRL, USD/TRY) e **ouro** (XAU/USD), em 1, 3, 5 e 15 minutos. Câmbio e ouro vêm de pares contra USDT da Binance (por exemplo EURUSDT), que acompanham o ativo real mas **não são o mesmo feed da sua corretora**, operam 24h (inclusive fim de semana) e têm preços cotados em passos pequenos (EURUSDT anda de 0,0001 em 0,0001, o que gera muitos empates). Ao abrir, o app confere quais desses pares a Binance ainda lista e esconde os inativos. O app mostra um aviso quando o ativo é uma referência. Carrega até 6.000 candles de histórico (configurável) para treinar e validar o modelo. A análise é refeita a cada segundo e imediatamente quando um candle fecha; o candle em formação ainda pode mudar, então o sinal oscila até ele fechar.
 
 - A **Quotex não tem API pública**, então a ferramenta não lê preços de dentro dela. Em ativos OTC a corretora gera os próprios preços, e nenhuma análise de mercado se aplica a eles.
 - O modo ao vivo precisa de uma página com acesso à internet aberta: `npm start` ou uma hospedagem estática (por exemplo o GitHub Pages, em Settings → Pages → Deploy from branch → `master`, depois de mergear). A cópia publicada como artefato do Claude bloqueia conexões externas e esconde esses controles.
@@ -28,7 +28,7 @@ Compara a expiração escolhida (o horizonte, em candles) com o **ponto de empat
 
 O alerta não usa mais o score por indicadores (que continua na tela só como referência). Ele usa um **modelo estatístico treinado nos dados**, e só fala quando a validação mostra vantagem:
 
-- **Modelo:** regressão logística com regularização, 16 variáveis causais (retornos normalizados, distância às médias, RSI, Bollinger, VWAP, volume, regime de volatilidade, hora do dia e, da Binance, o **fluxo de ordens**: quanto do volume foi compra a mercado). Prevê a probabilidade de o preço fechar acima daqui a `expiração` candles.
+- **Modelo:** regressão logística com regularização forte. São calculadas 16 variáveis causais (retornos normalizados, distância às médias, RSI, Bollinger, VWAP, volume, regime de volatilidade, hora do dia e, da Binance, o **fluxo de ordens**: quanto do volume foi compra a mercado), e o padrão usa as 8 que se mostraram mais bem calibradas (retornos de 3, 10 e 20 candles, diferença entre médias, volume, fluxo de ordens e regime de volatilidade). Prevê a probabilidade de o preço fechar acima daqui a `expiração` candles.
 - **Validação walk-forward:** treina numa janela (padrão 2.500 candles), prevê o bloco seguinte, avança. Os rótulos que ainda dependem do futuro são descartados do treino (purga). Todas as métricas vêm de previsões feitas **sobre candles que o modelo não viu**.
 - **Limiar fixado antes:** a entrada exige probabilidade ≥ ponto de empate do payout + margem (padrão 1 p.p.). As operações da estratégia não se sobrepõem, então a amostra é honesta.
 - **Gate (todos os critérios):** operações independentes suficientes (padrão 30), limite inferior de confiança do acerto **acima do ponto de empate**, modelo melhor que o acaso (escore de Brier) e probabilidade atual acima do limiar.
@@ -38,9 +38,23 @@ O cartão **Decisão e validação do modelo** mostra o que passou ou falhou, o 
 
 Verificado em dados sintéticos: com um sinal real plantado o modelo o encontra (AUC ~0,58 com sinal fraco) e, em 120 passeios aleatórios, **nenhum** foi validado. **Em dados reais de cripto de 1 a 15 minutos é esperado que o resultado seja "sem vantagem comprovada" na maior parte do tempo.** Isso é a ferramenta funcionando, não falhando.
 
+### Resultados com dados reais (22/11/2026)
+
+Avaliação walk-forward com dados reais da Binance, protocolo fixado antes de ver resultados: 8 ativos (BTC, ETH, BNB, SOL, XRP, DOGE, EUR/USDT, PAXG) × 2 tempos (1 min com expiração de 5 candles; 5 min com 3 candles) = 16 testes, payout 85%, ~7 mil candles fora da amostra cada, limite de confiança corrigido para 16 testes (z = 2,95).
+
+- **15 de 16 sem vantagem.** AUC médio 0,51 (0,50 = acaso), acerto de sinais fortes entre 49% e 54%, abaixo do ponto de empate (54,1%). O modelo piora o escore de Brier em 15 dos 16 (previsões superconfiantes), então o gate bloqueia.
+- **1 passou, e era artefato:** EUR/USDT em 1 min (acerto 59,4%, limite inferior 54,9%). Uma regra sem modelo nenhum ("apostar contra o último movimento") acerta 59,7% nesse mesmo dado: é o "quique" entre os preços vizinhos de um ativo cotado em passos de 0,0001 (50% dos candles ficam parados). Não é vantagem que exista no feed da corretora, e o acerto foi instável (54% nos primeiros dias, 88% no último).
+- **Proteção criada depois:** se 20% ou mais dos candles fecham no preço em que abriram, o app bloqueia o alerta e explica o motivo. A regra foi criada *depois* de ver esse resultado, mas por um diagnóstico com linha de base, e nenhum outro ativo é afetado (máximo medido fora o EUR: 12%).
+- **Ajuste de calibração (mesmo dia):** o gráfico acima mostrou superconfiança (ganho negativo sobre o acaso em todas as séries). Num conjunto de desenvolvimento anterior, nunca usado na avaliação, comparei 12 configurações (4 regularizações × 3 conjuntos de variáveis), escolhendo só pela **calibração média**, não pelo acerto. Ficou com 8 variáveis e λ = 1000 (era 16 variáveis e λ = 10): no teste, o ganho sobre o acaso foi de −1,47% para +0,04% e o AUC de 0,510 para 0,514. **Ainda 0 de 14 séries validadas:** o modelo ficou honesto (probabilidades perto de 50%), mas não achou vantagem. Também ficou melhor com dados sintéticos (calibra melhor num passeio aleatório e detecta melhor o sinal plantado).
+- **Para refazer** com dados novos: `node scripts/baixar-historico.js pasta` e `npm run avaliar -- pasta`; para repetir o ajuste, `node scripts/ajustar.js pasta-desenvolvimento pasta-teste` (o desenvolvimento precisa ser anterior ao teste).
+
+Conclusão prática: nestes dados, em 1 a 5 minutos, o modelo não achou vantagem real. Qualquer mudança no modelo a partir daqui precisa ser validada em dados **posteriores** a esta avaliação (por exemplo, no simulador em tempo real), senão vira ajuste ao que já foi visto.
+
 ### Simulador de operações
 
 Carteira fictícia (R$ 1.000 iniciais) de opções binárias, no modo ao vivo: **CALL** (acima) ou **PUT** (abaixo), valor por operação, payout e expiração configuráveis. A operação entra ao preço atual e é liquidada no vencimento (vitória paga o payout, derrota perde o valor, empate devolve). Há opção de entrar automaticamente nos alertas. Entradas aparecem como triângulos no gráfico e o saldo, as operações e as preferências ficam salvos no navegador. O acerto só significa algo com muitas operações (100 ou mais) e deve ser comparado com o ponto de empate. Operar no simulador em tempo real é o teste fora da amostra que o backtest não consegue ser.
+
+Para o câmbio real (feed da corretora ou do MetaTrader), exporte o histórico em CSV e carregue pelo botão **Carregar CSV**: o modelo valida do mesmo jeito, só que sem o fluxo de ordens, que o CSV não traz.
 
 ### Formato dos dados
 

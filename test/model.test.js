@@ -120,3 +120,37 @@ test('correção de múltiplos testes torna o gate mais rígido', () => {
   const k20 = M.evaluate(preds, 3, 85, { z: M.zForTests(20), minN: 30 });
   assert.ok(k20.star.hitLow < k1.star.hitLow);
 });
+
+test('quantization: separa preço em passos grandes de preço contínuo', () => {
+  const smooth = series(500, 3, 0);
+  assert.equal(M.quantization(smooth).quantized, false);
+  // mesma série cotada em passos de 0,25% do preço: muitos candles "parados"
+  const step = smooth.map(k => { const q = x => Math.round(x / 0.25) * 0.25; return Object.assign({}, k, { o: q(k.o), c: q(k.c) }); });
+  const r = M.quantization(step);
+  assert.ok(r.flatShare > 0.2 && r.quantized, 'flatShare ' + r.flatShare);
+  assert.equal(M.quantization([]).quantized, false);
+});
+
+test('subconjunto de variáveis: usa só as colunas pedidas e rejeita nomes desconhecidos', () => {
+  const c = series(5500, 33, 1), ind = I.computeAll(c);
+  const wf = M.walkForward(c, ind, 3, { features: ['taker', 'taker5'] });
+  const ev = M.evaluate(wf.preds, 3, 85, {});
+  assert.ok(ev.auc > 0.55, 'AUC só com fluxo de ordens ' + ev.auc);
+  assert.throws(() => M.walkForward(c, ind, 3, { features: ['nao_existe'] }), /desconhecida/);
+  // o modelo guarda as colunas e prevê a partir da linha completa de variáveis
+  const { X } = M.buildFeatures(c, ind);
+  const m = M.fitLatest(c, X, M.labels(c, 3), 3, { features: ['taker'] }, c.length - 1);
+  assert.deepEqual(m.cols, [M.FEATURES.indexOf('taker')]);
+  assert.ok(m.w.length === 2 && M.predictProb(m, X[c.length - 1]) > 0 && M.predictProb(m, X[c.length - 1]) < 1);
+});
+
+test('padrão calibrado: não é superconfiante num passeio aleatório (regressão do overfitting)', () => {
+  let nw = 0, old = 0; const N = 6;
+  for (let s = 1; s <= N; s++) {
+    const c = series(4500, 900 + s, 0), ind = I.computeAll(c);
+    nw += M.evaluate(M.walkForward(c, ind, 3, {}).preds, 3, 85, {}).brierSkill;
+    old += M.evaluate(M.walkForward(c, ind, 3, { lambda: 10, features: null }).preds, 3, 85, {}).brierSkill;
+  }
+  assert.ok(nw / N > -0.01, 'ganho Brier médio do padrão: ' + nw / N);
+  assert.ok(nw / N > old / N + 0.005, 'o padrão deve calibrar melhor que λ=10 com 16 variáveis');
+});

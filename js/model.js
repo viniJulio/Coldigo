@@ -18,7 +18,13 @@
   const FEATURES = ['ret1', 'ret3', 'ret5', 'ret10', 'ret20', 'emaDist', 'emaSpread', 'rsi', 'pctB',
     'vwapDist', 'volZ', 'taker', 'taker5', 'volRegime', 'todSin', 'todCos'];
   const WARM = 220;
-  const DEFAULTS = { trainN: 2500, block: 250, lambda: 10 };
+  // Padrão escolhido por calibração em dados de desenvolvimento (scripts/ajustar.js): 8 variáveis e
+  // regularização forte. O padrão anterior (16 variáveis, λ=10) tinha ganho negativo sobre o acaso em
+  // 14 de 14 séries (probabilidades superconfiantes).
+  const CORE_FEATURES = ['ret3', 'ret10', 'ret20', 'emaSpread', 'volZ', 'taker', 'taker5', 'volRegime'];
+  const DEFAULTS = { trainN: 2500, block: 250, lambda: 1000, features: CORE_FEATURES };
+  const pickCols = names => (names ? names.map(n => { const j = FEATURES.indexOf(n); if (j < 0) throw new Error('variável desconhecida: ' + n); return j; }) : null);
+  const sel = (row, cols) => { if (!cols) return row; const r = new Float64Array(cols.length); for (let k = 0; k < cols.length; k++) r[k] = row[cols[k]]; return r; };
 
   const clip = (x, a) => (x > a ? a : x < -a ? -a : x);
   const sigmoid = x => 1 / (1 + Math.exp(-clip(x, 30)));
@@ -52,6 +58,16 @@
 
   /** z do limite inferior unilateral de 97,5%, corrigido (Bonferroni) para k configurações testadas. */
   function zForTests(k) { return normQuantile(1 - 0.025 / Math.max(1, k)); }
+
+  /** Qualidade do preço: parcela de candles que fecham exatamente onde abriram. Em dados cotados em
+   *  passos grandes (EUR/USDT anda de 0,0001 em 0,0001) o "quique" entre dois preços vizinhos gera
+   *  padrões de reversão que parecem vantagem e são artefato do feed (medido: 28% a 50% no EUR/USDT;
+   *  no máximo ~12% nos demais ativos testados). */
+  const QUANTIZED_LIMIT = 0.20;
+  function quantization(candles) {
+    const share = candles.length ? candles.filter(k => k.c === k.o).length / candles.length : 0;
+    return { flatShare: share, quantized: share >= QUANTIZED_LIMIT };
+  }
 
   // ---------- Features ----------
   function buildFeatures(candles, ind) {
@@ -178,6 +194,7 @@
   }
 
   function predictProb(model, row) {
+    row = sel(row, model.cols);
     let eta = model.w[0];
     for (let j = 0; j < row.length; j++) eta += model.w[j + 1] * (row[j] - model.mu[j]) / model.sd[j];
     return sigmoid(eta);
@@ -187,12 +204,14 @@
    *  já era conhecido: o rótulo de j depende de j+H, que precisa ser <= upTo. */
   function fitLatest(candles, X, y, H, opts, upTo) {
     opts = Object.assign({}, DEFAULTS, opts);
-    const rows = [], ys = [];
+    const cols = pickCols(opts.features), rows = [], ys = [];
     for (let j = upTo - H; j >= WARM && rows.length < opts.trainN; j--) {
-      if (X[j] && y[j] != null) { rows.push(X[j]); ys.push(y[j]); }
+      if (X[j] && y[j] != null) { rows.push(sel(X[j], cols)); ys.push(y[j]); }
     }
     if (rows.length < 500) return null;
-    return fitLogistic(rows, ys, opts.lambda);
+    const model = fitLogistic(rows, ys, opts.lambda);
+    model.cols = cols;
+    return model;
   }
 
   /** Walk-forward: previsões fora da amostra para todos os candles após a primeira janela de treino. */
@@ -203,15 +222,16 @@
     if (n < needed) return { preds: [], fits: 0, needed, insufficient: true };
     const { X, hasTakerFlow } = buildFeatures(candles, ind);
     const y = labels(candles, H);
+    const cols = pickCols(opts.features);
     const preds = [];
     let fits = 0;
     for (let s = WARM + H + opts.trainN; s < n; s += opts.block) {
       const rows = [], ys = [];
       for (let j = s - H - 1; j >= WARM && rows.length < opts.trainN; j--) { // purga: j + H < s
-        if (X[j] && y[j] != null) { rows.push(X[j]); ys.push(y[j]); }
+        if (X[j] && y[j] != null) { rows.push(sel(X[j], cols)); ys.push(y[j]); }
       }
       if (rows.length < 500) continue;
-      const model = fitLogistic(rows, ys, opts.lambda); fits++;
+      const model = fitLogistic(rows, ys, opts.lambda); model.cols = cols; fits++;
       for (let i = s; i < Math.min(s + opts.block, n); i++) {
         if (X[i] && y[i] != null) preds.push({ i, p: predictProb(model, X[i]), y: y[i] });
       }
@@ -295,8 +315,8 @@
   }
 
   const api = {
-    FEATURES, WARM, DEFAULTS, buildFeatures, labels, fitLogistic, predictProb, fitLatest, walkForward,
-    evaluate, strategy, auc, normQuantile, wilsonLower, zForTests, solve
+    FEATURES, CORE_FEATURES, WARM, DEFAULTS, buildFeatures, labels, fitLogistic, predictProb, fitLatest, walkForward,
+    evaluate, strategy, auc, normQuantile, wilsonLower, zForTests, solve, quantization, QUANTIZED_LIMIT
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Coldigo = Object.assign(root.Coldigo || {}, { Model: api });

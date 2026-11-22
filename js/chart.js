@@ -10,7 +10,7 @@
       this.canvas = canvas;
       this.ctx = canvas.getContext('2d');
       this.tooltip = tooltipEl;
-      this.candles = []; this.an = null; this.markers = [];
+      this.candles = []; this.an = null; this.markers = []; this.dec = 2;
       this.show = { vwap: true, ema: true, bb: false, levels: true, forecast: true, volume: true, rsi: true, targets: true };
       this.view = { start: 0, count: 100 };
       this.mouse = null; this.drag = null;
@@ -336,7 +336,7 @@
       ctx.setLineDash([]);
       if (y <= L.price.h) {
         const price = hi - y / L.price.h * (hi - lo);
-        tag(ctx, L.plotW, y, price.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), th.cross, '#fff');
+        tag(ctx, L.plotW, y, price.toLocaleString('pt-BR', { minimumFractionDigits: this.dec, maximumFractionDigits: this.dec }), th.cross, '#fff');
       }
       this._updateTooltip();
     }
@@ -345,17 +345,18 @@
 
     _updateTooltip() {
       if (!this.tooltip || !this.mouse) return;
+      const fp = v => v.toLocaleString('pt-BR', { minimumFractionDigits: this.dec, maximumFractionDigits: this.dec });
       const i = this._indexAt(this.mouse.x), n = this.candles.length;
       const z = v => String(v).padStart(2, '0');
       if (i >= 0 && i < n) {
         const k = this.candles[i], d = new Date(k.t);
         const chg = ((k.c - k.o) / k.o * 100);
         this.tooltip.innerHTML = `<b>${z(d.getDate())}/${z(d.getMonth() + 1)} ${z(d.getHours())}:${z(d.getMinutes())}</b> ` +
-          `A <b>${k.o.toFixed(2)}</b> Máx <b>${k.h.toFixed(2)}</b> Mín <b>${k.l.toFixed(2)}</b> F <b>${k.c.toFixed(2)}</b> ` +
-          `<span class="${chg >= 0 ? 'pos' : 'neg'}">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%</span> Vol <b>${k.v.toLocaleString('pt-BR')}</b>`;
+          `A <b>${fp(k.o)}</b> Máx <b>${fp(k.h)}</b> Mín <b>${fp(k.l)}</b> F <b>${fp(k.c)}</b> ` +
+          `<span class="${chg >= 0 ? 'pos' : 'neg'}">${chg >= 0 ? '+' : ''}${chg.toFixed(2).replace('.', ',')}%</span> Vol <b>${k.v.toLocaleString('pt-BR')}</b>`;
       } else if (i >= n && this.an && i - n < this.an.forecast.horizon) {
         const b = this.an.forecast.bands[i - n];
-        this.tooltip.innerHTML = `<b>Projeção +${i - n + 1}</b> mediana <b>${b.p50.toFixed(2)}</b> · 50%: ${b.p25.toFixed(2)}–${b.p75.toFixed(2)} · 80%: ${b.p10.toFixed(2)}–${b.p90.toFixed(2)}`;
+        this.tooltip.innerHTML = `<b>Projeção +${i - n + 1}</b> mediana <b>${fp(b.p50)}</b> · 50%: ${fp(b.p25)}–${fp(b.p75)} · 80%: ${fp(b.p10)}–${fp(b.p90)}`;
       }
     }
 

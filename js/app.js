@@ -6,7 +6,7 @@
   const params = { horizon: 12, simulations: 2000, window: 300, driftFactor: 0.1, tpAtr: 1.5, slAtr: 1, payout: 85, history: 6000, trainN: 2500 };
   const alertCfg = Object.assign({}, Sim.DEFAULT_CFG);
   const prefs = { stake: 10, auto: false, sound: true };
-  const state = { candles: [], analysis: null, source: '', live: null, liveLen: 0, alert: null, alertLog: [], bannerDismissed: null, research: null, pred: null, closedSince: 0 };
+  const state = { candles: [], analysis: null, source: '', live: null, liveLen: 0, alert: null, alertLog: [], bannerDismissed: null, research: null, pred: null, closedSince: 0, dec: 2 };
   const chart = new Chart($('chart'), $('tooltip'));
 
   const PART_LABELS = { trend: 'Tendência', vwap: 'VWAP', momentum: 'Momentum', rsi: 'RSI', bollinger: 'Bollinger' };
@@ -14,6 +14,10 @@
   const pct = v => (v == null ? '–' : (v * 100).toFixed(1).replace('.', ',') + '%');
   const num = (v, d = 2) => v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d });
   const sgn = v => (v >= 0 ? '+' : '') + num(v);
+  // Preços usam as casas do ativo (EUR/USD = 4, BTC = 2). Sem ativo conhecido, deduz pela magnitude.
+  const decFromPrice = p => (p >= 100 ? 2 : p >= 10 ? 3 : p >= 1 ? 4 : p >= 0.1 ? 5 : 6);
+  const px = v => num(v, state.dec);
+  const pxa = v => num(v, state.dec + (state.dec >= 3 ? 1 : 0));
   const money = v => (v < 0 ? '−' : '') + 'R$ ' + num(Math.abs(v));
   const smoney = v => (v > 0 ? '+' : v < 0 ? '−' : '') + 'R$ ' + num(Math.abs(v));
   const z2 = v => String(v).padStart(2, '0');
@@ -54,6 +58,9 @@
   }
 
   function analyze(resetView) {
+    const known = state.live && Live.asset(state.live.symbol);
+    state.dec = known ? known.dec : decFromPrice(state.candles[state.candles.length - 1].c);
+    chart.dec = state.dec;
     state.analysis = Forecast.analyze(state.candles, params);
     chart.setData(state.candles, state.analysis, resetView);
     renderMeta();
@@ -65,7 +72,7 @@
     const first = new Date(c[0].t), last = new Date(c[c.length - 1].t);
     const d = t => t.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     const stepMin = Math.round(a.stepMs / 60000);
-    $('meta').innerHTML = `<b>${state.source}</b> · ${c.length} candles de ${stepMin} min · ${d(first)} → ${d(last)} · último <b>${num(a.last)}</b> · ATR(14) <b>${num(a.atr)}</b>`;
+    $('meta').innerHTML = `<b>${state.source}</b> · ${c.length} candles de ${stepMin} min · ${d(first)} → ${d(last)} · último <b>${px(a.last)}</b> · ATR(14) <b>${pxa(a.atr)}</b>`;
   }
 
   function reasons(a) {
@@ -98,7 +105,7 @@
       return `<div class="bar"><span>${PART_LABELS[k]} <small class="note">${Math.round(a.weights[k] * 100)}%</small></span><div class="track"><i style="${style}"></i></div><span class="val">${sgn(v)}</span></div>`;
     }).join('');
 
-    const lvl = (arr, name) => arr.length ? arr.map((l, i) => `<div class="row"><span>${name}${i + 1} · ${l.touches} toque(s)</span><b>${num(l.price)}</b></div>`).join('') : `<div class="note">Sem ${name === 'R' ? 'resistências' : 'suportes'} identificados.</div>`;
+    const lvl = (arr, name) => arr.length ? arr.map((l, i) => `<div class="row"><span>${name}${i + 1} · ${l.touches} toque(s)</span><b>${px(l.price)}</b></div>`).join('') : `<div class="note">Sem ${name === 'R' ? 'resistências' : 'suportes'} identificados.</div>`;
 
     const bt = a.backtest;
     const btRows = bt.rows.map(r => `<tr><td>≥ ${num(r.threshold)}</td><td>${r.signals}</td><td>${r.hitRate == null ? '–' : pct(r.hitRate)}</td><td>${r.avgReturnPct == null ? '–' : num(r.avgReturnPct, 3) + '%'}</td></tr>`).join('');
@@ -119,20 +126,20 @@
 
       <div class="card">
         <h3>Movimentação estimada</h3>
-        <div class="row"><span>Mediana no fim do horizonte</span><b>${num(last.p50)} (${sgn((last.p50 - f.entry) / f.entry * 100)}%)</b></div>
-        <div class="row"><span>Faixa 50% provável</span><b>${num(last.p25)} – ${num(last.p75)}</b></div>
-        <div class="row"><span>Faixa 80% provável</span><b>${num(last.p10)} – ${num(last.p90)}</b></div>
+        <div class="row"><span>Mediana no fim do horizonte</span><b>${px(last.p50)} (${sgn((last.p50 - f.entry) / f.entry * 100)}%)</b></div>
+        <div class="row"><span>Faixa 50% provável</span><b>${px(last.p25)} – ${px(last.p75)}</b></div>
+        <div class="row"><span>Faixa 80% provável</span><b>${px(last.p10)} – ${px(last.p90)}</b></div>
         <div class="row"><span>Probabilidade de fechar acima</span><b>${pct(f.probUp)}</b></div>
-        <div class="row"><span>Máxima esperada (mediana)</span><b>${num(f.expectedHigh.p50)}</b></div>
-        <div class="row"><span>Mínima esperada (mediana)</span><b>${num(f.expectedLow.p50)}</b></div>
+        <div class="row"><span>Máxima esperada (mediana)</span><b>${px(f.expectedHigh.p50)}</b></div>
+        <div class="row"><span>Mínima esperada (mediana)</span><b>${px(f.expectedLow.p50)}</b></div>
         <div class="legend" style="margin-top:6px"><span><i style="background:var(--c-forecast)"></i>cone no gráfico: 50% e 80%</span></div>
       </div>
 
       <div class="card">
         <h3>${sideName} · alvo ${params.tpAtr}× ATR / stop ${params.slAtr}× ATR</h3>
-        <div class="row"><span>Entrada</span><b>${num(f.entry)}</b></div>
-        <div class="row"><span>Alvo</span><b class="pos">${num(f.entry + dirTp * f.tpDistance)}</b></div>
-        <div class="row"><span>Stop</span><b class="neg">${num(f.entry - dirTp * f.slDistance)}</b></div>
+        <div class="row"><span>Entrada</span><b>${px(f.entry)}</b></div>
+        <div class="row"><span>Alvo</span><b class="pos">${px(f.entry + dirTp * f.tpDistance)}</b></div>
+        <div class="row"><span>Stop</span><b class="neg">${px(f.entry - dirTp * f.slDistance)}</b></div>
         <div class="prob" title="alvo / stop / nenhum"><i style="width:${sideData.tp * 100}%"></i><i style="width:${sideData.sl * 100}%"></i><i style="width:${sideData.none * 100}%"></i></div>
         <div class="legend"><span><i style="background:var(--up)"></i>alvo ${pct(sideData.tp)}</span><span><i style="background:var(--down)"></i>stop ${pct(sideData.sl)}</span><span><i style="background:var(--muted)"></i>nenhum ${pct(sideData.none)}</span></div>
         <div class="row" style="margin-top:6px"><span>Razão risco/retorno</span><b>1 : ${num(params.tpAtr / params.slAtr)}</b></div>
@@ -147,7 +154,7 @@
       <div class="card">
         <h3>Níveis relevantes</h3>
         ${lvl(a.resistances, 'R')}
-        ${a.pivots ? `<div class="row"><span>Pivô (PP) pregão anterior</span><b>${num(a.pivots.PP)}</b></div>` : ''}
+        ${a.pivots ? `<div class="row"><span>Pivô (PP) pregão anterior</span><b>${px(a.pivots.PP)}</b></div>` : ''}
         ${lvl(a.supports, 'S')}
       </div>
 
@@ -254,6 +261,13 @@
     const k = countTests(key), z = Model.zForTests(k);
     state.research = { status: 'running', key, k, z, n: state.candles.length };
     state.closedSince = 0;
+    const q = Model.quantization(state.candles);
+    if (q.quantized) { // preço em passos grandes: padrões de curtíssimo prazo costumam ser artefato do feed
+      state.research = { status: 'quantized', key, k, z, n: state.candles.length, flatShare: q.flatShare };
+      state.pred = null; state.alert = null;
+      renderDecision();
+      return;
+    }
     renderDecision();
     setTimeout(() => {
       try {
@@ -292,7 +306,7 @@
   }
 
   function fireAlert(res, last) {
-    const label = state.live ? state.live.symbol.replace('USDT', '/USDT') + ' · ' + state.live.interval : state.source;
+    const label = state.live ? Live.label(state.live.symbol) + ' · ' + state.live.interval : state.source;
     const entry = { t: last.t + (state.live ? state.live.intervalMs : 0), side: res.side, label, auto: false };
     if (prefs.auto && state.live && portfolio.open.length === 0) {
       try { enterTrade(res.side, 'alerta'); entry.auto = true; } catch (e) { showError(e.message); }
@@ -307,6 +321,7 @@
     const r = state.research, al = state.alert;
     if (!r || r.status === 'running') return { kind: 'wait', text: `Validando o modelo em ${state.candles.length} candles…` };
     if (r.status === 'insufficient') return { kind: 'none', text: `NÃO OPERAR · dados insuficientes para validar o modelo (precisa de ${r.needed} candles, há ${r.n}). No modo Ao vivo o histórico é carregado automaticamente.` };
+    if (r.status === 'quantized') return { kind: 'none', text: `NÃO OPERAR · preço muito quantizado: ${(r.flatShare * 100).toFixed(0)}% dos candles fecham no mesmo preço em que abrem. Nesse tipo de dado, padrões de curtíssimo prazo costumam ser artefato do passo de preço do feed, não uma vantagem que exista na sua corretora. Use o histórico do feed da própria corretora (CSV) ou um tempo gráfico maior.` };
     if (r.status === 'error') return { kind: 'none', text: 'NÃO OPERAR · erro ao validar o modelo: ' + r.message };
     if (!al) return { kind: 'wait', text: 'Aguardando o candle fechar para prever.' };
     if (al.res.fire) return { kind: al.res.side === 'down' ? 'put' : 'call', text: null };
@@ -454,12 +469,12 @@
   function renderTrades() {
     const now = Date.now();
     const open = portfolio.open.map(t =>
-      `<div class="tr open"><span>${hhmm(t.t)}</span><span>${SIDE_TXT[t.side]}</span><span>${num(t.entry)} · ${money(t.stake)}</span><span>${mmss(t.expiry - now)}</span></div>`).join('');
+      `<div class="tr open"><span>${hhmm(t.t)}</span><span>${SIDE_TXT[t.side]}</span><span>${px(t.entry)} · ${money(t.stake)}</span><span>${mmss(t.expiry - now)}</span></div>`).join('');
     $('sim-open').innerHTML = open ? `<div class="trades"><h4>Em andamento</h4>${open}</div>` : '';
     const closed = portfolio.closed.slice(-8).reverse().map(t => {
       const cls = t.result === 'win' ? 'pos' : t.result === 'loss' ? 'neg' : '';
       const mark = t.result === 'win' ? '✓' : t.result === 'loss' ? '✗' : '=';
-      return `<div class="tr"><span>${hhmm(t.t)}</span><span>${SIDE_TXT[t.side]}</span><span>${num(t.entry)} → ${num(t.exit)}${t.approx ? ' (aprox.)' : ''}</span><span class="${cls}">${mark} ${smoney(t.pnl)}</span></div>`;
+      return `<div class="tr"><span>${hhmm(t.t)}</span><span>${SIDE_TXT[t.side]}</span><span>${px(t.entry)} → ${px(t.exit)}${t.approx ? ' (aprox.)' : ''}</span><span class="${cls}">${mark} ${smoney(t.pnl)}</span></div>`;
     }).join('');
     $('sim-history').innerHTML = closed ? `<div class="trades"><h4>Encerradas</h4>${closed}</div>` : '';
   }
@@ -489,7 +504,33 @@
   // --- Ao vivo (Binance) ---
   let pendingTimer = null, lastRun = 0, countdownTimer = null, liveStatus = 'idle';
   const symSel = $('live-symbol'), intSel = $('live-interval'), liveBtn = $('btn-live'), pill = $('live-status');
-  Live.SYMBOLS.forEach(sy => symSel.add(new Option(sy.replace('USDT', '/USDT'), sy)));
+  const unavailable = new Set();
+  function fillAssets() {
+    const keep = symSel.value;
+    symSel.innerHTML = '';
+    for (const group of ['Cripto', 'Câmbio', 'Ouro']) {
+      const items = Live.ASSETS.filter(a => a.group === group && !unavailable.has(a.symbol));
+      if (!items.length) continue;
+      const og = document.createElement('optgroup');
+      og.label = group === 'Câmbio' ? 'Câmbio (referência via Binance)' : group === 'Ouro' ? 'Ouro (referência via Binance)' : group;
+      items.forEach(a => og.appendChild(new Option(a.label, a.symbol)));
+      symSel.appendChild(og);
+    }
+    if (keep && Array.from(symSel.options).some(o => o.value === keep)) symSel.value = keep;
+  }
+  fillAssets();
+  // Ao abrir, confere quais pares de câmbio/ouro a Binance ainda lista e esconde os inativos
+  if (!window.COLDIGO_NO_LIVE) {
+    Live.checkAvailability(Live.ASSETS.filter(a => a.verify).map(a => a.symbol)).then(r => {
+      Object.keys(r).forEach(sym => { if (r[sym] === false) unavailable.add(sym); });
+      if (unavailable.size) fillAssets();
+    });
+  }
+  function updateAssetNote() {
+    const a = state.live && Live.asset(state.live.symbol), el = $('asset-note');
+    el.hidden = !(a && a.proxy);
+    if (a && a.proxy) el.textContent = `Preço de referência: ${a.symbol} na Binance. Acompanha o ${a.label}, mas não é o mesmo feed da sua corretora e a Binance opera 24h, inclusive no fim de semana, quando o mercado de câmbio real está fechado. Os preços podem divergir um pouco.`;
+  }
 
   function setStatus(kind, msg) {
     liveStatus = kind;
@@ -530,7 +571,7 @@
 
   function onLiveData(candles, info) {
     state.candles = candles;
-    state.source = `Binance · ${symSel.value.replace('USDT', '/USDT')} · ${intSel.value} (ao vivo)`;
+    state.source = `Binance · ${Live.label(symSel.value)}${(Live.asset(symSel.value) || {}).proxy ? ' (' + symSel.value + ')' : ''} · ${intSel.value} (ao vivo)`;
     settleNow();
     if (info.reset) {
       state.liveLen = candles.length; showError('');
@@ -550,6 +591,7 @@
     state.alertLog = []; state.alert = null; state.bannerDismissed = null; state.research = null; state.pred = null;
     state.live = new Live.LiveFeed({ symbol: symSel.value, interval: intSel.value, history: params.history, onData: onLiveData, onStatus: setStatus });
     liveBtn.classList.add('on'); liveBtn.setAttribute('aria-pressed', 'true');
+    updateAssetNote();
     countdownTimer = setInterval(tick, 1000);
     state.live.start();
   }
@@ -559,6 +601,7 @@
     clearInterval(countdownTimer); clearTimeout(pendingTimer); pendingTimer = null;
     unlockScreen();
     liveBtn.classList.remove('on'); liveBtn.setAttribute('aria-pressed', 'false');
+    $('asset-note').hidden = true;
     setStatus('idle');
     syncMarkers();
   }
