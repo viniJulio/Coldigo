@@ -6,7 +6,7 @@
 
   const REST = 'https://data-api.binance.vision/api/v3/klines';
   const WS = 'wss://data-stream.binance.vision/ws/';
-  const INTERVAL_MS = { '1m': 60000, '3m': 180000, '5m': 300000, '15m': 900000 };
+  const INTERVAL_MS = { '1m': 60000, '3m': 180000, '5m': 300000, '15m': 900000, '30m': 1800000, '1h': 3600000, '4h': 14400000 };
   // Catálogo. `proxy`: a Binance não lista o par real; usa-se o par contra USDT como referência.
   // `verify`: a listagem pode ter mudado, então o app confere se o par está ativo ao abrir.
   const ASSETS = [

@@ -3,7 +3,7 @@
   const { Forecast, Data, Chart, Live, Sim, Model, Indicators } = window.Coldigo;
   const $ = id => document.getElementById(id);
 
-  const params = { horizon: 12, simulations: 2000, window: 300, driftFactor: 0.1, tpAtr: 1.5, slAtr: 1, payout: 85, history: 6000, trainN: 2500 };
+  const params = { horizon: 12, simulations: 2000, window: 300, driftFactor: 0.1, tpAtr: 1.5, slAtr: 1, payout: 85, history: 6000, trainN: 2500, market: 'spot', feePct: 0.1 };
   const alertCfg = Object.assign({}, Sim.DEFAULT_CFG);
   const prefs = { stake: 10, auto: false, sound: true };
   const state = { candles: [], analysis: null, source: '', live: null, liveLen: 0, alert: null, alertLog: [], bannerDismissed: null, research: null, pred: null, closedSince: 0, dec: 2 };
@@ -23,7 +23,10 @@
   const z2 = v => String(v).padStart(2, '0');
   const hhmm = t => { const d = new Date(t); return `${z2(d.getHours())}:${z2(d.getMinutes())}`; };
   const mmss = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${z2(s % 60)}`; };
-  const SIDE_TXT = { up: '▲ CALL', down: '▼ PUT' };
+  const isFee = () => params.market !== 'binary';
+  const MARKET_TXT = { binary: 'Opção binária (payout fixo)', spot: 'Binance à vista (só compra)', futures: 'Binance futuros (compra e venda)' };
+  const sideTxt = (s, mode) => ((mode || (isFee() ? 'fee' : 'binary')) === 'fee' ? (s === 'up' ? '▲ COMPRA' : '▼ VENDA') : (s === 'up' ? '▲ CALL' : '▼ PUT'));
+  const pctp = v => (v == null ? '–' : (v >= 0 ? '+' : '') + (v * 100).toFixed(3).replace('.', ',') + '%');
 
   // --- Persistência local (tolerante a falhas) ---
   const KEY = 'coldigo.sim.v1';
@@ -37,7 +40,7 @@
   Object.assign(prefs, saved.prefs);
   Object.assign(alertCfg, saved.alertCfg);
   Object.assign(params, saved.params);
-  function persist() { store.set({ portfolio, prefs, alertCfg, tests, params: { horizon: params.horizon, payout: params.payout, history: params.history, trainN: params.trainN } }); }
+  function persist() { store.set({ portfolio, prefs, alertCfg, tests, params: { horizon: params.horizon, payout: params.payout, history: params.history, trainN: params.trainN, market: params.market, feePct: params.feePct } }); }
 
   function showError(msg) {
     const el = $('error');
@@ -177,9 +180,13 @@
       <div class="card">
         <h3>Operação</h3>
         <div class="params">
-          ${row('p-horizon', 'Expiração (candles)', 'min="3" max="60"', params.horizon)}
-          ${row('p-payout', 'Payout (%)', 'min="50" max="100" step="1"', params.payout)}
+          <label for="p-market">Mercado</label>
+          <select id="p-market">${Object.keys(MARKET_TXT).map(k => `<option value="${k}"${k === params.market ? ' selected' : ''}>${MARKET_TXT[k]}</option>`).join('')}</select>
+          ${row('p-horizon', 'Saída / expiração (candles)', 'min="1" max="60"', params.horizon)}
+          ${row('p-fee', 'Taxa por lado (%)', 'min="0" max="1" step="0.01"', params.feePct)}
+          ${row('p-payout', 'Payout da binária (%)', 'min="50" max="100" step="1"', params.payout)}
         </div>
+        <p class="note" style="margin-top:8px">Na Binance você paga a taxa na entrada e na saída e ganha ou perde o tamanho do movimento. Taxas padrão: à vista 0,1% e futuros 0,05% por lado (confira as da sua conta). Na opção binária vale o payout.</p>
       </div>
 
       <div class="card">
@@ -218,7 +225,14 @@
       analyze(reset);
       if (research) runResearch();
     };
-    bind('p-horizon', v => { params.horizon = Math.max(3, Math.min(60, Math.round(v))); }, reanalyze(true, true));
+    bind('p-horizon', v => { params.horizon = Math.max(1, Math.min(60, Math.round(v))); }, reanalyze(true, true));
+    bind('p-fee', v => { params.feePct = Math.max(0, Math.min(1, v)); }, reanalyze(false, true));
+    $('p-market').addEventListener('change', e => {
+      params.market = e.target.value;
+      if (params.market !== 'binary') { params.feePct = params.market === 'spot' ? 0.1 : 0.05; $('p-fee').value = params.feePct; }
+      persist(); renderSim();
+      try { showError(''); reanalyze(false, true)(); } catch (err) { showError(err.message); }
+    });
     bind('p-payout', v => { params.payout = Math.max(50, Math.min(100, v)); }, reanalyze(false, true));
     bind('p-train', v => { params.trainN = Math.max(800, Math.min(8000, Math.round(v))); }, reanalyze(false, true));
     bind('p-history', v => { params.history = Math.max(3000, Math.min(10000, Math.round(v))); }, () => {});
@@ -236,13 +250,19 @@
     sample: ['Operações independentes validadas (fora da amostra)', c => `${c.value} ≥ ${c.need}`],
     edge: ['Acerto: limite inferior de confiança acima do empate', c => `${pct(c.value)} > ${pct(c.need)}`],
     skill: ['Modelo melhor que o acaso (escore de Brier)', c => `${c.value > 0 ? '+' : ''}${(c.value * 100).toFixed(2).replace('.', ',')}%`],
-    prob: ['Probabilidade atual acima do limiar de entrada', c => `${pct(c.value)} ≥ ${pct(c.need)}`]
+    prob: ['Probabilidade atual acima do limiar de entrada', c => `${pct(c.value)} ≥ ${pct(c.need)}`],
+    net: ['Lucro líquido médio por operação (limite inferior) acima de zero', c => `${pctp(c.value)} > 0`],
+    excess: ['Ganho além da tendência do mercado (limite inferior) acima de zero', c => `${pctp(c.value)} > 0`],
+    cover: ['Probabilidade atual cobre a taxa de ida e volta', c => (c.need >= 1 ? 'taxa > movimento típico' : `${pct(c.value)} ≥ ${pct(c.need)}`)]
   };
   const REASONS = {
     sample: c => `poucos sinais independentes validados fora da amostra (${c.value} de ${c.need} necessários)`,
     edge: c => `sem vantagem comprovada fora da amostra (limite inferior ${pct(c.value)} não passa do empate ${pct(c.need)})`,
     skill: () => 'o modelo não supera o acaso fora da amostra',
-    prob: c => `probabilidade atual (${pct(c.value)}) abaixo do limiar de entrada (${pct(c.need)})`
+    prob: c => `probabilidade atual (${pct(c.value)}) abaixo do limiar de entrada (${pct(c.need)})`,
+    net: c => `fora da amostra, o lucro depois das taxas não é comprovadamente positivo (limite inferior ${pctp(c.value)} por operação)`,
+    excess: c => `o lucro, quando aparece, vem da tendência do mercado e não do modelo (limite inferior do excesso ${pctp(c.value)})`,
+    cover: c => (c.need >= 1 ? 'a taxa de ida e volta é maior que o movimento típico neste tempo gráfico: nem acertando sempre daria lucro. Use um tempo gráfico ou uma saída maior' : `a probabilidade atual (${pct(c.value)}) não cobre a taxa; precisaria de ${pct(c.need)}`)
   };
 
   // Configurações distintas pesquisadas na última semana (correção de múltiplos testes).
@@ -257,7 +277,7 @@
 
   function runResearch() {
     if (!state.analysis || !state.candles.length) return;
-    const key = `${state.live ? state.live.symbol + '|' + state.live.interval : state.source}|H${params.horizon}|M${alertCfg.marginPct}`;
+    const key = `${state.live ? state.live.symbol + '|' + state.live.interval : state.source}|H${params.horizon}|${isFee() ? params.market + params.feePct : 'M' + alertCfg.marginPct}`;
     const k = countTests(key), z = Model.zForTests(k);
     state.research = { status: 'running', key, k, z, n: state.candles.length };
     state.closedSince = 0;
@@ -272,13 +292,14 @@
     setTimeout(() => {
       try {
         const t0 = performance.now();
-        const wf = Model.walkForward(state.candles, Indicators.computeAll(state.candles), params.horizon, { trainN: params.trainN });
+        const wf = Model.walkForward(state.candles, Indicators.computeAll(state.candles), params.horizon, { trainN: params.trainN, keepTies: isFee() });
         if (wf.insufficient) {
           state.research = { status: 'insufficient', key, k, z, n: state.candles.length, needed: wf.needed };
         } else {
           registerTest(key);
           const ev = Model.evaluate(wf.preds, params.horizon, params.payout, { marginPct: alertCfg.marginPct, minN: alertCfg.minN, z });
-          state.research = { status: 'done', key, k, z, n: state.candles.length, ev, fits: wf.fits, hasTakerFlow: wf.hasTakerFlow, ms: Math.round(performance.now() - t0), at: Date.now() };
+          const evc = isFee() ? Model.evaluateCosts(wf.preds, state.candles, params.horizon, { market: params.market, feePct: params.feePct, minN: alertCfg.minN, z }) : null;
+          state.research = { status: 'done', key, k, z, n: state.candles.length, ev, evc, market: params.market, fits: wf.fits, hasTakerFlow: wf.hasTakerFlow, ms: Math.round(performance.now() - t0), at: Date.now() };
         }
         refreshPrediction(lastClosedIndex(), false);
       } catch (e) { state.research = { status: 'error', message: e.message }; showError(e.message); renderDecision(); }
@@ -299,7 +320,9 @@
     const { X } = Model.buildFeatures(c, Indicators.computeAll(c));
     const model = Model.fitLatest(c, X, Model.labels(c, H), H, { trainN: params.trainN }, m);
     state.pred = model && X[m] ? { p: Model.predictProb(model, X[m]), t: c[m].t, idx: m } : null;
-    const res = state.pred ? Sim.evaluateAlert({ p: state.pred.p, research: r.ev }, alertCfg, params.payout) : null;
+    const res = !state.pred ? null : r.evc
+      ? Sim.evaluateAlertCosts({ p: state.pred.p, research: r.evc, market: r.market }, alertCfg)
+      : Sim.evaluateAlert({ p: state.pred.p, research: r.ev }, alertCfg, params.payout);
     state.alert = res && { res, candleT: c[m].t };
     if (notify && res && res.fire) fireAlert(res, c[m]);
     renderDecision();
@@ -325,7 +348,7 @@
     if (r.status === 'error') return { kind: 'none', text: 'NÃO OPERAR · erro ao validar o modelo: ' + r.message };
     if (!al) return { kind: 'wait', text: 'Aguardando o candle fechar para prever.' };
     if (al.res.fire) return { kind: al.res.side === 'down' ? 'put' : 'call', text: null };
-    const failed = al.res.checks.find(c => !c.ok);
+    const failed = al.res.checks.find(c => c.key === 'cover' && !c.ok && c.need >= 1) || al.res.checks.find(c => !c.ok);
     return { kind: 'none', text: `NÃO OPERAR · ${failed ? REASONS[failed.key](failed) : 'sem sinal'}` };
   }
 
@@ -337,7 +360,7 @@
       if (state.bannerDismissed === al.candleT) { el.hidden = true; return; }
       const { res } = al, mins = Math.round(params.horizon * (state.analysis.stepMs / 60000));
       el.className = 'alert-banner ' + (d.kind === 'put' ? 'put' : '');
-      el.innerHTML = `<span class="grow"><b>SINAL VALIDADO · ${SIDE_TXT[res.side]}</b> · probabilidade ${pct(res.pDir)} · expiração em ${params.horizon} candles (~${mins} min)</span>` +
+      el.innerHTML = `<span class="grow"><b>SINAL VALIDADO · ${sideTxt(res.side)}</b> · probabilidade ${pct(res.pDir)} · ${isFee() ? 'saída' : 'expiração'} em ${params.horizon} candles (~${mins} min)</span>` +
         (state.live ? `<button class="btn small primary" data-act="enter" data-side="${res.side}">Simular entrada</button>` : '') +
         '<button class="btn small" data-act="dismiss">Dispensar</button>';
     } else {
@@ -357,8 +380,28 @@
         const [label, fmt] = CHECK_LABELS[c.key];
         return `<li><span class="${c.ok ? 'ok' : 'no'}">${c.ok ? '✓' : '✗'}</span><span>${label}</span><span class="val">${c.value == null ? '–' : fmt(c)}</span></li>`;
       }).join('');
-      const ev = r.ev, star = ev.star;
+      const ev = r.ev, star = ev.star, evc = r.evc;
       const pos = Math.min(100, Math.max(0, (pUp - 0.4) / 0.2 * 100));
+      if (evc) {
+        const sumR = evc.n ? `${evc.n} operações (sem sobreposição): acerto ${pct(evc.hitRate)}, líquido médio ${pctp(evc.net.mean)} por operação (${pctp(evc.sumNet)} somando), maior queda ${pctp(-evc.maxDrawdown)}.` : '';
+        body = `
+        <div class="modelp"><span>Modelo no fechamento das ${hhmm(state.pred.t + (state.live ? state.live.intervalMs : 0))}</span>
+          <b>▲ ${pct(pUp)} &nbsp; ▼ ${pct(1 - pUp)}</b></div>
+        <div class="gauge mid"><i style="left:${pos}%"></i></div>
+        <ul class="checks">${checks}</ul>
+        <p class="note" style="margin:8px 0 0">${MARKET_TXT[r.market]}, taxa ${num(params.feePct, 2)}% por lado (${pctp(evc.costRoundTrip)} ida e volta). Movimento típico em ${params.horizon} candles: ${evc.typicalNow ? pctp(evc.typicalNow).replace('+', '') : '–'}. Tudo medido <b>fora da amostra</b>.</p>
+        <p class="note" style="margin:6px 0 0">${evc.n ? 'Fora da amostra, a regra teria feito ' + sumR : 'Fora da amostra, a probabilidade nunca cobriu a taxa: a regra não teria feito nenhuma operação.'} Comprar sempre teria dado ${pctp(evc.holdAllNet)} por operação.</p>
+        <details class="more"><summary>Detalhes da validação</summary>
+          <div class="row"><span>Operações fora da amostra</span><b>${evc.n}</b></div>
+          <div class="row"><span>Líquido médio (limite inferior)</span><b>${pctp(evc.net.mean)} (${pctp(evc.net.low)})</b></div>
+          <div class="row"><span>Além da tendência (limite inferior)</span><b>${pctp(evc.excess.mean)} (${pctp(evc.excess.low)})</b></div>
+          <div class="row"><span>Composto (todas as operações)</span><b>${pctp(evc.compounded)}</b></div>
+          <div class="row"><span>AUC (0,50 = acaso)</span><b>${ev.auc == null ? '–' : num(ev.auc, 3)}</b></div>
+          <div class="row"><span>Ganho sobre o acaso (Brier)</span><b>${ev.brierSkill == null ? '–' : (ev.brierSkill * 100).toFixed(2).replace('.', ',') + '%'}</b></div>
+          <div class="row"><span>Retreinos (janela ${params.trainN})</span><b>${r.fits}</b></div>
+          <p class="note" style="margin:8px 0 0">"Além da tendência" desconta a alta ou a queda média do período: num mercado que só sobe, comprar dá lucro sem mérito do modelo. Sem slippage. Você pesquisou <b>${r.k}</b> configuração(ões) na última semana, então o limite de confiança usa z = ${num(r.z, 2)}.</p>
+        </details>`;
+      } else {
       const trades = Sim.pnlTrades(star.trades, prefs.stake, params.payout), st = Sim.summarize(trades);
       const stratRows = ev.strategies.map(s => `<tr${Math.abs(s.threshold - ev.tStar) < 1e-9 ? ' class="gate"' : ''}><td>${pct(s.threshold)}${Math.abs(s.threshold - ev.tStar) < 1e-9 ? ' ★' : ''}</td><td>${s.n}</td><td>${pct(s.hitRate)}</td><td>${pct(s.hitLow)}</td><td>${s.evPerUnit == null ? '–' : smoney(Math.round(s.evPerUnit * 10000) / 100)}</td></tr>`).join('');
       const calRows = ev.calibration.map((g, i) => `<tr><td>${i + 1}º</td><td>${g.n}</td><td>${pct(g.meanP)}</td><td>${pct(g.freq)}</td></tr>`).join('');
@@ -384,10 +427,11 @@
           <table><thead><tr><th>Grupo</th><th>n</th><th>p médio</th><th>Real</th></tr></thead><tbody>${calRows}</tbody></table>
           <p class="note" style="margin:8px 0 0">Só a linha ★ vale como teste. As demais são informativas: escolher o melhor limiar depois de ver os resultados infla o acerto. Você pesquisou <b>${r.k}</b> configuração(ões) na última semana, então o limite de confiança usa z = ${num(r.z, 2)} (em vez de 1,96).</p>
         </details>`;
+      }
     }
     const log = state.alertLog.length
-      ? '<div class="log"><b>Últimos alertas</b>' + state.alertLog.map(l => `<div>${hhmm(l.t)} · ${SIDE_TXT[l.side]} · ${l.label}${l.auto ? ' · entrada simulada' : ''}</div>`).join('') + '</div>' : '';
-    const head = d.kind === 'call' || d.kind === 'put' ? `${SIDE_TXT[al.res.side]} · sinal validado`
+      ? '<div class="log"><b>Últimos alertas</b>' + state.alertLog.map(l => `<div>${hhmm(l.t)} · ${sideTxt(l.side, l.mode)} · ${l.label}${l.auto ? ' · entrada simulada' : ''}</div>`).join('') + '</div>' : '';
+    const head = d.kind === 'call' || d.kind === 'put' ? `${sideTxt(al.res.side)} · sinal validado`
       : d.kind === 'wait' ? 'Validando…' : 'Sem sinal validado agora';
     $('sec-alert').innerHTML = `
       <div class="card alert-card ${d.kind === 'call' || d.kind === 'put' ? 'firing' : ''}">
@@ -430,9 +474,11 @@
 
   function enterTrade(side, source) {
     if (!simReady()) throw new Error('Ative o modo Ao vivo para operar no simulador.');
+    if (params.market === 'spot' && side === 'down') throw new Error('No mercado à vista só é possível comprar.');
     const last = state.candles[state.candles.length - 1];
     portfolio.openTrade({
       side, price: last.c, t: Date.now(), stake: prefs.stake, payoutPct: params.payout, horizon: params.horizon,
+      feePct: isFee() ? params.feePct : undefined,
       intervalMs: state.live.intervalMs, symbol: state.live.symbol, source
     });
     persist(); syncMarkers(); renderSim();
@@ -458,10 +504,13 @@
       `<div class="row"><span>Saldo fictício</span><b>${money(portfolio.balance)}</b></div>` +
       `<div class="row"><span>Resultado</span><b class="${pnl >= 0 ? 'pos' : 'neg'}">${smoney(Math.round(pnl * 100) / 100)}</b></div>` +
       `<div class="row"><span>Operações encerradas</span><b>${st.trades}</b></div>` +
-      `<div class="row"><span>Acerto (ponto de empate ${pct(be)})</span><b>${pct(st.winRate)}</b></div>` +
+      (isFee() ? `<div class="row"><span>Operações com lucro líquido</span><b>${pct(st.winRate)}</b></div>`
+        : `<div class="row"><span>Acerto (ponto de empate ${pct(be)})</span><b>${pct(st.winRate)}</b></div>`) +
       (st.trades < 100 ? '<p class="note" style="margin:6px 0 0">Com menos de 100 operações o acerto ainda oscila demais. Acumule bastante antes de tirar conclusões.</p>' : '');
     const ready = simReady();
-    $('sim-call').disabled = !ready; $('sim-put').disabled = !ready;
+    $('sim-call').textContent = isFee() ? '▲ COMPRAR' : '▲ CALL (acima)';
+    $('sim-put').textContent = isFee() ? '▼ VENDER' : '▼ PUT (abaixo)';
+    $('sim-call').disabled = !ready; $('sim-put').disabled = !ready || params.market === 'spot';
     $('sim-hint').hidden = ready;
     renderTrades();
   }
@@ -469,12 +518,12 @@
   function renderTrades() {
     const now = Date.now();
     const open = portfolio.open.map(t =>
-      `<div class="tr open"><span>${hhmm(t.t)}</span><span>${SIDE_TXT[t.side]}</span><span>${px(t.entry)} · ${money(t.stake)}</span><span>${mmss(t.expiry - now)}</span></div>`).join('');
+      `<div class="tr open"><span>${hhmm(t.t)}</span><span>${sideTxt(t.side, t.mode || 'binary')}</span><span>${px(t.entry)} · ${money(t.stake)}</span><span>${mmss(t.expiry - now)}</span></div>`).join('');
     $('sim-open').innerHTML = open ? `<div class="trades"><h4>Em andamento</h4>${open}</div>` : '';
     const closed = portfolio.closed.slice(-8).reverse().map(t => {
       const cls = t.result === 'win' ? 'pos' : t.result === 'loss' ? 'neg' : '';
       const mark = t.result === 'win' ? '✓' : t.result === 'loss' ? '✗' : '=';
-      return `<div class="tr"><span>${hhmm(t.t)}</span><span>${SIDE_TXT[t.side]}</span><span>${px(t.entry)} → ${px(t.exit)}${t.approx ? ' (aprox.)' : ''}</span><span class="${cls}">${mark} ${smoney(t.pnl)}</span></div>`;
+      return `<div class="tr"><span>${hhmm(t.t)}</span><span>${sideTxt(t.side, t.mode || 'binary')}</span><span>${px(t.entry)} → ${px(t.exit)}${t.approx ? ' (aprox.)' : ''}</span><span class="${cls}">${mark} ${smoney(t.pnl)}</span></div>`;
     }).join('');
     $('sim-history').innerHTML = closed ? `<div class="trades"><h4>Encerradas</h4>${closed}</div>` : '';
   }

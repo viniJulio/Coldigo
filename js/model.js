@@ -233,7 +233,7 @@
       if (rows.length < 500) continue;
       const model = fitLogistic(rows, ys, opts.lambda); model.cols = cols; fits++;
       for (let i = s; i < Math.min(s + opts.block, n); i++) {
-        if (X[i] && y[i] != null) preds.push({ i, p: predictProb(model, X[i]), y: y[i] });
+        if (X[i] && (y[i] != null || (opts.keepTies && i + H < n))) preds.push({ i, p: predictProb(model, X[i]), y: y[i] });
       }
     }
     return { preds, fits, needed, insufficient: false, hasTakerFlow, firstOos: preds.length ? preds[0].i : null };
@@ -279,6 +279,7 @@
 
   /** Avalia as previsões fora da amostra. `tStar` é o limiar do gate, definido antes dos resultados. */
   function evaluate(preds, H, payoutPct, opts) {
+    preds = preds.filter(q => q.y != null);
     opts = Object.assign({ marginPct: 1, minN: 30, z: 1.96 }, opts);
     const be = 1 / (1 + payoutPct / 100), tStar = be + opts.marginPct / 100;
     const n = preds.length;
@@ -314,9 +315,60 @@
     };
   }
 
+
+  // ---------- Avaliação com taxas (Binance à vista ou futuros) ----------
+  /** Opera no fechamento de i e sai no fechamento de i+H, pagando `feePct` (+ `slipPct`) na entrada e na saída.
+   *  Entra só quando a probabilidade cobre o custo: (2p-1) * |movimento típico| > custo de ida e volta,
+   *  ou seja p >= 0,5 + custo / (2 * |movimento típico|). O movimento típico usa só movimentos já
+   *  encerrados (j+H <= i). À vista só compra; futuros compra e vende. Operações não se sobrepõem.
+   *  "Excesso" desconta a deriva do período (subir por subir não conta como acerto do modelo). */
+  function evaluateCosts(preds, candles, H, opts) {
+    opts = Object.assign({ market: 'spot', feePct: 0.1, slipPct: 0, z: 1.96, minN: 30, window: 500 }, opts);
+    const n = candles.length, cost = 2 * (opts.feePct + opts.slipPct) / 100;
+    const P = new Float64Array(n + 1);
+    for (let j = 0; j < n; j++) P[j + 1] = P[j] + (j + H < n ? Math.abs(candles[j + H].c / candles[j].c - 1) : 0);
+    const typical = i => { // média de |movimento em H| dos últimos `window` movimentos já encerrados em i
+      const hi = i - H, lo = Math.max(0, hi - opts.window + 1);
+      return hi - lo + 1 >= 50 ? (P[hi + 1] - P[lo]) / (hi - lo + 1) : null;
+    };
+    const oos = preds.filter(q => q.i + H < n).sort((a, b) => a.i - b.i);
+    const ret = i => candles[i + H].c / candles[i].c - 1;
+    const drift = oos.length ? oos.reduce((s, q) => s + ret(q.i), 0) / oos.length : 0;
+    const trades = [];
+    let nextFree = -Infinity;
+    for (const q of oos) {
+      if (q.i < nextFree) continue;
+      const e = typical(q.i);
+      if (!e) continue;
+      const need = 0.5 + cost / (2 * e);
+      const dir = q.p >= need ? 1 : (opts.market === 'futures' && 1 - q.p >= need ? -1 : 0);
+      if (!dir) continue;
+      const raw = ret(q.i);
+      trades.push({ i: q.i, side: dir > 0 ? 'up' : 'down', p: q.p, need, raw, net: dir * raw - cost, excess: dir * (raw - drift) });
+      nextFree = q.i + H;
+    }
+    const stat = key => {
+      const k = trades.length;
+      if (!k) return { mean: null, sd: null, low: null };
+      const m = trades.reduce((s, t) => s + t[key], 0) / k;
+      const sd = k > 1 ? Math.sqrt(trades.reduce((s, t) => s + (t[key] - m) ** 2, 0) / (k - 1)) : 0;
+      return { mean: m, sd, low: k > 1 ? m - opts.z * sd / Math.sqrt(k) : null };
+    };
+    const net = stat('net'), excess = stat('excess');
+    let eq = 0, peak = 0, maxDD = 0, comp = 1;
+    for (const t of trades) { eq += t.net; peak = Math.max(peak, eq); maxDD = Math.max(maxDD, peak - eq); comp *= 1 + t.net; }
+    const holdAll = oos.length ? oos.reduce((s, q) => s + ret(q.i), 0) / oos.length - cost : null; // "comprar sempre"
+    const validated = trades.length >= opts.minN && net.low != null && net.low > 0 && excess.low != null && excess.low > 0;
+    return {
+      market: opts.market, costRoundTrip: cost, n: trades.length, trades, hitRate: trades.length ? trades.filter(t => t.net > 0).length / trades.length : null,
+      net, excess, sumNet: eq, compounded: comp - 1, maxDrawdown: maxDD, drift, holdAllNet: holdAll, z: opts.z, minN: opts.minN, validated,
+      typicalNow: typical(n - 1) // movimento típico com o que já se encerrou até o último candle
+    };
+  }
+
   const api = {
     FEATURES, CORE_FEATURES, WARM, DEFAULTS, buildFeatures, labels, fitLogistic, predictProb, fitLatest, walkForward,
-    evaluate, strategy, auc, normQuantile, wilsonLower, zForTests, solve, quantization, QUANTIZED_LIMIT
+    evaluate, evaluateCosts, strategy, auc, normQuantile, wilsonLower, zForTests, solve, quantization, QUANTIZED_LIMIT
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Coldigo = Object.assign(root.Coldigo || {}, { Model: api });
