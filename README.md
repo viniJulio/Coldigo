@@ -52,6 +52,17 @@ Avaliação walk-forward com dados reais da Binance, protocolo fixado antes de v
 
 Conclusão prática: nestes dados, de 1 minuto a 24 horas, com payout ou com taxas, o modelo não achou vantagem real. Qualquer mudança no modelo a partir daqui precisa ser validada em dados **posteriores** a esta avaliação (por exemplo, no simulador em tempo real), senão vira ajuste ao que já foi visto.
 
+### Opção binária com câmbio real (Twelve Data)
+
+No mercado **Opção binária**, a lista de ativos mostra **câmbio real do mercado interbancário** (EUR/USD, GBP/USD, USD/JPY, AUD/USD, EUR/JPY, GBP/JPY e outros, além de ouro) pelo [Twelve Data](https://twelvedata.com), com cripto da Binance logo abaixo. Ao escolher a binária, o app abre no EUR/USD.
+
+- Crie uma conta grátis no Twelve Data, copie a sua chave de API e salve em **Parâmetros → Dados de câmbio real**. A chave fica só no navegador e só é enviada ao Twelve Data.
+- O plano grátis permite 8 consultas por minuto e 800 por dia, sem streaming contínuo. O app faz 1 consulta para o histórico (até 5.000 candles) e depois **1 por candle fechado**; o contador aparece na tela. Em 1 minuto isso dá cerca de 13 horas por dia num par; em 5 minutos ou mais, o dia todo.
+- Não há candles de 3 minutos no Twelve Data, e o câmbio não tem volume (o painel some).
+- **Não são os preços da sua corretora**: nenhuma corretora de opção binária publica o próprio feed. É o mercado interbancário que ela acompanha nos ativos que não são OTC, e os valores podem diferir um pouco. **Nos fins de semana** o câmbio oficial está fechado: o Twelve Data continua entregando preços, mas eles não vêm do mercado interbancário, e a corretora usa ativos OTC próprios. O app avisa nesse período.
+
+Avaliação com EUR/USD real (24/11/2026, protocolo fixado antes, payout 85%, 4 testes: 1 min x5, 5 min x3, 15 min x4 e 1 h x4, ~2.200 candles fora da amostra cada): **nenhum validado**, nem sem a correção. O melhor foi 1 min com saída em 5 candles (AUC 0,545, acerto de 55,7% em 253 sinais), mas com limite inferior de 47,9% e probabilidades piores que um palpite constante. Esses 1 min cobrem só 3,5 dias, pouco para concluir; vale acompanhar no simulador.
+
 ### Tempo da operação
 
 No simulador, **Tempo da operação** escolhe quanto tempo cada operação dura (de 1 minuto a alguns dias). As opções são múltiplos do candle do gráfico aberto, porque o modelo prevê "daqui a N candles". Ao trocar o tempo gráfico, o tempo escolhido é mantido; se ele não couber (30 minutos num gráfico de 4 horas), o app usa o mais próximo e avisa. O modelo, o alerta, o simulador e as ordens da conta demo usam esse mesmo tempo.

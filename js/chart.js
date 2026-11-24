@@ -20,6 +20,7 @@
 
     setData(candles, analysis, resetView = true) {
       this.candles = candles; this.an = analysis;
+      this.hasVolume = candles.some(k => k.v > 0); // câmbio interbancário não tem volume
       if (resetView) this.resetView();
       this.render();
     }
@@ -45,7 +46,7 @@
     _layout(w, h) {
       const plotW = w - AXIS_W;
       const avail = h - TIME_H - GAP * 2;
-      const volH = this.show.volume ? Math.round(avail * 0.14) : 0;
+      const volH = this.show.volume && this.hasVolume !== false ? Math.round(avail * 0.14) : 0;
       const rsiH = this.show.rsi ? Math.round(avail * 0.17) : 0;
       const priceH = avail - volH - rsiH;
       const price = { x: 0, y: 0, w: plotW, h: priceH };
