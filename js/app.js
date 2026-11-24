@@ -573,7 +573,7 @@
     if (params.market === 'spot') {
       nota.innerHTML = prefs.ponteEnviar && conta.conectada
         ? 'VENDER fica bloqueado: a conta demo é operada no mercado à vista, onde só dá para comprar. A venda do que você comprou é automática no fim do tempo da operação.'
-        : 'VENDER fica bloqueado no mercado à vista: lá só dá para comprar, e a venda do que você comprou é automática no fim do tempo da operação. Para apostar na queda, <button class="linklike" id="sim-ir-futuros" type="button">use Binance futuros</button> (ou opção binária em Parâmetros → Operação).';
+        : 'VENDER fica bloqueado no mercado à vista: lá só dá para comprar, e a venda do que você comprou é automática no fim do tempo da operação. Para apostar na queda, use <button class="linklike" data-mercado="futures" type="button">Binance futuros</button> ou <button class="linklike" data-mercado="binary" type="button">opção binária</button>.';
     }
     $('sim-hint').hidden = ready;
     renderTrades();
@@ -678,9 +678,10 @@
   $('sim-sound').addEventListener('change', e => { prefs.sound = e.target.checked; persist(); if (prefs.sound) ensureAudio(); });
   const manual = side => () => { ensureAudio(); try { showError(''); enterTrade(side, 'manual'); } catch (err) { showError(err.message); } };
   $('sim-venda-nota').addEventListener('click', e => {
-    if (e.target.id !== 'sim-ir-futuros') return;
+    const m = e.target.dataset && e.target.dataset.mercado;
+    if (!m) return;
     const sel = $('p-market');
-    sel.value = 'futures';
+    sel.value = m;
     sel.dispatchEvent(new Event('change'));
   });
   $('sim-call').addEventListener('click', manual('up'));
