@@ -82,6 +82,12 @@ Carteira fictícia (R$ 1.000 iniciais) de opções binárias, no modo ao vivo: *
 
 Para o câmbio real (feed da corretora ou do MetaTrader), exporte o histórico em CSV e carregue pelo botão **Carregar CSV**: o modelo valida do mesmo jeito, só que sem o fluxo de ordens, que o CSV não traz.
 
+### Desempenho das suas entradas
+
+O cartão **Desempenho das suas entradas** mede a assertividade das operações encerradas no simulador: acerto com **intervalo de 95%** (para saber se já dá para concluir algo), ponto de empate do payout, resultado, acerto com e sem sinal validado, a favor e contra o modelo, **calibração** (quando o modelo dava 55%, 60%…, quanto acertou de fato) e por ativo. **Exportar operações (CSV)** baixa todas as operações, com a probabilidade do modelo na hora de cada entrada, para análise em planilha.
+
+Com poucas dezenas de operações o intervalo é largo demais para concluir; ajustar o modelo a partir delas é ajustá-lo ao acaso.
+
 ### Conta demo da Binance (ponte local, Windows)
 
 O app pode enviar as suas entradas (o botão COMPRAR e os alertas) para a **conta demo** da Binance e mostrar saldo, ordens executadas, taxas e o resultado real. Quem fala com a Binance é a **ponte**, um pequeno programa que roda no seu computador:
