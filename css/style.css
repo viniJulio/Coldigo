@@ -165,3 +165,6 @@ tr.gate td { font-weight: 600; background: color-mix(in srgb, var(--accent) 10%,
 #conta-card .note { margin: 8px 0 0; }
 .trades .tr.demo { grid-template-columns: 42px minmax(0, 1fr) auto auto; }
 .trades .tr.demo span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dur-form { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; align-items: center; font-size: 13px; margin: 0 0 4px; }
+.dur-form select { width: 100%; min-width: 0; }
+#sim-duracao-nota { margin: 2px 0 10px !important; }

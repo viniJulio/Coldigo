@@ -52,6 +52,10 @@ Avaliação walk-forward com dados reais da Binance, protocolo fixado antes de v
 
 Conclusão prática: nestes dados, de 1 minuto a 24 horas, com payout ou com taxas, o modelo não achou vantagem real. Qualquer mudança no modelo a partir daqui precisa ser validada em dados **posteriores** a esta avaliação (por exemplo, no simulador em tempo real), senão vira ajuste ao que já foi visto.
 
+### Tempo da operação
+
+No simulador, **Tempo da operação** escolhe quanto tempo cada operação dura (de 1 minuto a alguns dias). As opções são múltiplos do candle do gráfico aberto, porque o modelo prevê "daqui a N candles". Ao trocar o tempo gráfico, o tempo escolhido é mantido; se ele não couber (30 minutos num gráfico de 4 horas), o app usa o mais próximo e avisa. O modelo, o alerta, o simulador e as ordens da conta demo usam esse mesmo tempo.
+
 ### Binance: operar com taxas
 
 Em **Parâmetros → Operação**, escolha o mercado: **opção binária** (payout fixo), **Binance à vista** (só compra) ou **Binance futuros** (compra e venda), e a **taxa por lado** (padrão 0,1% à vista e 0,05% em futuros; confira as da sua conta). No modo Binance:

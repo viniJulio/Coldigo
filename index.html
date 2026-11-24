@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Coldigo — Análise gráfica day trade</title>
-  <link rel="stylesheet" href="css/style.css?v=2026-11-24.3">
+  <link rel="stylesheet" href="css/style.css?v=2026-11-24.4">
 </head>
 <body>
   <header class="topbar">
@@ -59,6 +59,11 @@
           <label for="sim-stake">Valor por operação (R$)</label>
           <input id="sim-stake" type="number" min="1" step="1" value="10">
         </div>
+        <div class="dur-form">
+          <label for="sim-duracao">Tempo da operação</label>
+          <select id="sim-duracao"></select>
+        </div>
+        <p class="note" id="sim-duracao-nota"></p>
         <div class="sim-buttons">
           <button class="btn call" id="sim-call" disabled>▲ CALL (acima)</button>
           <button class="btn put" id="sim-put" disabled>▼ PUT (abaixo)</button>
@@ -83,7 +88,7 @@
         <div class="sim-form" id="ponte-opcoes" hidden>
           <label for="ponte-valor">Valor por ordem (USDT)</label><input id="ponte-valor" type="number" min="5" step="1" value="20">
         </div>
-        <label class="chk" id="ponte-enviar-wrap" hidden><input type="checkbox" id="ponte-enviar"> Enviar minhas entradas (COMPRAR e alertas) para a conta demo</label>
+        <label class="chk" id="ponte-enviar-wrap" hidden><input type="checkbox" id="ponte-enviar"> Enviar minhas entradas (COMPRAR e alertas) para a conta demo, com o tempo da operação escolhido no simulador</label>
         <div id="conta-ops"></div>
         <p class="note">A ponte roda no seu computador e guarda a chave da conta demo; este app nunca vê a chave. Como instalar: README, seção "Conta demo da Binance".</p>
       </div>
@@ -116,15 +121,15 @@
     </div>
   </dialog>
 
-  <script>window.COLDIGO_VERSION = '2026-11-24.3';</script>
-  <script src="js/indicators.js?v=2026-11-24.3"></script>
-  <script src="js/forecast.js?v=2026-11-24.3"></script>
-  <script src="js/data.js?v=2026-11-24.3"></script>
-  <script src="js/live.js?v=2026-11-24.3"></script>
-  <script src="js/model.js?v=2026-11-24.3"></script>
-  <script src="js/sim.js?v=2026-11-24.3"></script>
-  <script src="js/ponte.js?v=2026-11-24.3"></script>
-  <script src="js/chart.js?v=2026-11-24.3"></script>
-  <script src="js/app.js?v=2026-11-24.3"></script>
+  <script>window.COLDIGO_VERSION = '2026-11-24.4';</script>
+  <script src="js/indicators.js?v=2026-11-24.4"></script>
+  <script src="js/forecast.js?v=2026-11-24.4"></script>
+  <script src="js/data.js?v=2026-11-24.4"></script>
+  <script src="js/live.js?v=2026-11-24.4"></script>
+  <script src="js/model.js?v=2026-11-24.4"></script>
+  <script src="js/sim.js?v=2026-11-24.4"></script>
+  <script src="js/ponte.js?v=2026-11-24.4"></script>
+  <script src="js/chart.js?v=2026-11-24.4"></script>
+  <script src="js/app.js?v=2026-11-24.4"></script>
 </body>
 </html>

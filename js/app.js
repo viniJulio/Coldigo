@@ -22,7 +22,7 @@
   const smoney = v => (v > 0 ? '+' : v < 0 ? '−' : '') + 'R$ ' + num(Math.abs(v));
   const z2 = v => String(v).padStart(2, '0');
   const hhmm = t => { const d = new Date(t); return `${z2(d.getHours())}:${z2(d.getMinutes())}`; };
-  const mmss = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${z2(s % 60)}`; };
+  const mmss = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return s >= 3600 ? `${Math.floor(s / 3600)}:${z2(Math.floor(s / 60) % 60)}:${z2(s % 60)}` : `${Math.floor(s / 60)}:${z2(s % 60)}`; };
   const isFee = () => params.market !== 'binary';
   const MARKET_TXT = { binary: 'Opção binária (payout fixo)', spot: 'Binance à vista (só compra)', futures: 'Binance futuros (compra e venda)' };
   const sideTxt = (s, mode) => ((mode || (isFee() ? 'fee' : 'binary')) === 'fee' ? (s === 'up' ? '▲ COMPRA' : '▼ VENDA') : (s === 'up' ? '▲ CALL' : '▼ PUT'));
@@ -56,6 +56,7 @@
       showError('');
       analyze(true);
       runResearch();
+      renderDuracoes();
     } catch (e) {
       showError(e.message);
     }
@@ -226,7 +227,7 @@
       analyze(reset);
       if (research) runResearch();
     };
-    bind('p-horizon', v => { params.horizon = Math.max(1, Math.min(60, Math.round(v))); }, reanalyze(true, true));
+    bind('p-horizon', v => { params.horizon = Math.max(1, Math.min(60, Math.round(v))); }, () => { reanalyze(true, true)(); renderDuracoes(); });
     bind('p-fee', v => { params.feePct = Math.max(0, Math.min(1, v)); }, reanalyze(false, true));
     $('p-market').addEventListener('change', e => {
       params.market = e.target.value;
@@ -470,6 +471,38 @@
   async function lockScreen() { try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch (_) { /* opcional */ } }
   function unlockScreen() { try { if (wake) wake.release(); } catch (_) { /* ignora */ } wake = null; }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && state.live) lockScreen(); });
+
+  // --- Tempo da operação ---
+  // O tempo é sempre múltiplo do candle do gráfico (o modelo prevê "daqui a H candles"). Ao trocar o
+  // tempo gráfico, o tempo da operação escolhido é mantido; se não couber, usa o mais próximo possível.
+  const DURACOES = [1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240, 360, 480, 720, 1440, 2880];
+  const durTxt = m => (m < 60 ? `${m} min` : m % 1440 === 0 ? `${m / 1440} dia${m > 1440 ? 's' : ''}` : m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60} min`);
+  const ivMinOf = iv => Live.INTERVAL_MS[iv] / 60000;
+  const intervalMin = () => (state.live ? state.live.intervalMs / 60000 : state.analysis ? Math.max(1, Math.round(state.analysis.stepMs / 60000)) : 1);
+  const opcoesDuracao = iv => DURACOES.filter(d => d % iv === 0 && d / iv >= 1 && d / iv <= 60);
+  function maisProxima(dur, iv) {
+    const opts = opcoesDuracao(iv);
+    return opts.reduce((b, d) => (Math.abs(Math.log(d / dur)) < Math.abs(Math.log(b / dur)) ? d : b), opts[0]);
+  }
+
+  let avisoDuracao = '';
+  function renderDuracoes() {
+    const iv = intervalMin(), atual = params.horizon * iv, sel = $('sim-duracao');
+    const opts = opcoesDuracao(iv);
+    if (!opts.includes(atual)) { opts.push(atual); opts.sort((a, b) => a - b); } // tempo definido à mão em candles
+    sel.innerHTML = opts.map(d => `<option value="${d}"${d === atual ? ' selected' : ''}>${durTxt(d)} (${d / iv} candle${d / iv > 1 ? 's' : ''} de ${durTxt(iv)})</option>`).join('');
+    $('sim-duracao-nota').textContent = `${avisoDuracao ? avisoDuracao + ' ' : ''}Cada operação termina ${durTxt(atual)} depois da entrada. O modelo e o alerta são validados para esse mesmo tempo.`;
+  }
+
+  function setHorizon(H) {
+    avisoDuracao = '';
+    params.horizon = Math.max(1, Math.min(60, Math.round(H)));
+    const inp = $('p-horizon'); if (inp) inp.value = params.horizon;
+    persist();
+    if (state.analysis) { try { analyze(true); runResearch(); } catch (e) { showError(e.message); } }
+    renderDuracoes(); renderSim();
+  }
+  $('sim-duracao').addEventListener('change', e => setHorizon(+e.target.value / intervalMin()));
 
   // --- Simulador ---
   function simReady() { return !!state.live && !!state.analysis && state.candles.length > 0; }
@@ -724,6 +757,7 @@
     if (info.reset) {
       state.liveLen = candles.length; showError('');
       try { analyze(true); runResearch(); } catch (e) { showError(e.message); }
+      renderDuracoes();
       lastRun = Date.now(); syncMarkers(); renderSim(); return;
     }
     // reanalisa no máximo 1x por segundo, e na hora ao fechar um candle (é quando o alerta é avaliado)
@@ -755,7 +789,22 @@
   }
 
   liveBtn.addEventListener('click', () => (state.live ? stopLive() : startLive()));
-  [symSel, intSel].forEach(el => el.addEventListener('change', () => { if (state.live) startLive(); }));
+  symSel.addEventListener('change', () => { if (state.live) startLive(); });
+  let ivAnterior = intSel.value;
+  intSel.addEventListener('change', () => {
+    if (state.live) {
+      const dur = params.horizon * ivMinOf(ivAnterior), iv = ivMinOf(intSel.value);
+      let H = dur / iv;
+      if (!(Number.isInteger(H) && H >= 1 && H <= 60)) {
+        const d = maisProxima(dur, iv);
+        H = d / iv;
+        avisoDuracao = `O tempo de ${durTxt(dur)} não cabe em candles de ${durTxt(iv)}; ajustei para ${durTxt(d)}.`;
+      }
+      params.horizon = H; const inp = $('p-horizon'); if (inp) inp.value = H; persist();
+      startLive();
+    }
+    ivAnterior = intSel.value;
+  });
   if (window.COLDIGO_NO_LIVE) $('live-controls').hidden = true;
 
   // --- Entradas ---
