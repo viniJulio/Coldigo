@@ -53,6 +53,7 @@
   }
 
   function summarize(trades) {
+    trades = trades.filter(t => t.result !== 'void');
     const wins = trades.filter(t => t.result === 'win').length;
     const losses = trades.filter(t => t.result === 'loss').length;
     let eq = 0, peak = 0, maxDD = 0;
@@ -74,6 +75,8 @@
     return ans;
   }
 
+  const LATE_MS = 20000;
+
   class Portfolio {
     constructor(data) {
       data = data || {};
@@ -92,42 +95,71 @@
         id: ++this.seq, side: o.side, entry: o.price, t: o.t, stake: o.stake, payoutPct: o.payoutPct,
         mode: o.feePct != null ? 'fee' : 'binary', feePct: o.feePct,
         horizon: o.horizon, intervalMs: o.intervalMs, expiry: o.t + o.horizon * o.intervalMs,
-        symbol: o.symbol || '', source: o.source || 'manual'
+        symbol: o.symbol || '', source: o.source || 'manual', interval: o.interval, context: o.context || null
       };
       this.open.push(trade);
       return trade;
     }
 
-    /** Liquida as operações vencidas. Retorna as que foram encerradas agora. */
-    settle(candles, now) {
+    /** Calcula o resultado de uma operação ao preço `price` e a move para as encerradas.
+     *  how: 'live' (preço ao vivo no vencimento) ou 'minute' (abertura do minuto do vencimento, consultada depois). */
+    _close(tr, price, how) {
+      const dir = tr.side === 'up' ? 1 : -1, diff = (price - tr.entry) * dir;
+      let result, pnl;
+      if (tr.mode === 'fee') { // Binance: ganha/perde o movimento e paga a taxa na entrada e na saída
+        pnl = round2(tr.stake * (dir * (price / tr.entry - 1) - 2 * tr.feePct / 100));
+        result = pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'tie';
+        this.balance = round2(this.balance + tr.stake + pnl);
+      } else { // opção binária: payout fixo, empate devolve
+        result = diff > 0 ? 'win' : diff < 0 ? 'loss' : 'tie';
+        pnl = result === 'win' ? round2(tr.stake * tr.payoutPct / 100) : result === 'loss' ? -tr.stake : 0;
+        this.balance = round2(this.balance + (result === 'win' ? tr.stake + pnl : result === 'tie' ? tr.stake : 0));
+      }
+      const closed = Object.assign({}, tr, { exit: price, result, pnl, how });
+      this.closed.push(closed);
+      if (this.closed.length > 300) this.closed = this.closed.slice(-300);
+      return closed;
+    }
+
+    /** Liquida no vencimento, com o preço ao vivo, só as operações DESTE ativo (`symbol`).
+     *  Operações de outro ativo, ou vencidas há mais de 20 s (app fechado, reconexão), NUNCA usam
+     *  estes candles: ficam para `settleAt`, com o preço do próprio ativo no minuto do vencimento. */
+    settle(candles, now, symbol) {
       const done = [], keep = [];
       for (const tr of this.open) {
-        if (now < tr.expiry || !candles.length) { keep.push(tr); continue; }
-        const last = candles[candles.length - 1];
-        const late = now - tr.expiry > 20000;
-        let price = last.c, approx = false;
-        if (late) { // aba parada ou reconexão: usa o candle que continha o vencimento
-          const k = candleAt(candles, tr.expiry);
-          if (k >= 0) price = candles[k].c;
-          approx = true;
-        }
-        const dir = tr.side === 'up' ? 1 : -1, diff = (price - tr.entry) * dir;
-        let result, pnl;
-        if (tr.mode === 'fee') { // Binance: ganha/perde o movimento e paga a taxa na entrada e na saída
-          pnl = round2(tr.stake * (dir * (price / tr.entry - 1) - 2 * tr.feePct / 100));
-          result = pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'tie';
-          this.balance = round2(this.balance + tr.stake + pnl);
-        } else { // opção binária: payout fixo, empate devolve
-          result = diff > 0 ? 'win' : diff < 0 ? 'loss' : 'tie';
-          pnl = result === 'win' ? round2(tr.stake * tr.payoutPct / 100) : result === 'loss' ? -tr.stake : 0;
-          this.balance = round2(this.balance + (result === 'win' ? tr.stake + pnl : result === 'tie' ? tr.stake : 0));
-        }
-        const closed = Object.assign({}, tr, { exit: price, result, pnl, approx });
-        this.closed.push(closed); done.push(closed);
+        const mine = symbol == null || tr.symbol === symbol;
+        if (now < tr.expiry || !candles.length || !mine || now - tr.expiry > LATE_MS) { keep.push(tr); continue; }
+        done.push(this._close(tr, candles[candles.length - 1].c, 'live'));
       }
       this.open = keep;
-      if (this.closed.length > 300) this.closed = this.closed.slice(-300);
       return done;
+    }
+
+    /** Operações vencidas que precisam do preço do vencimento consultado na fonte. */
+    needsLookup(now, liveSymbol) {
+      return this.open.filter(tr => now >= tr.expiry && (now - tr.expiry > LATE_MS || tr.symbol !== liveSymbol));
+    }
+
+    /** Liquida uma operação específica a um preço consultado. */
+    settleAt(id, price, how) {
+      const k = this.open.findIndex(tr => tr.id === id);
+      if (k < 0 || !(price > 0)) return null;
+      const [tr] = this.open.splice(k, 1);
+      return this._close(tr, price, how || 'minute');
+    }
+
+    /** Anula operações liquidadas com o preço de outro ativo (erro de versões anteriores): devolve o valor. */
+    repair() {
+      let fixed = 0;
+      for (const c of this.closed) {
+        if (c.result === 'void' || !(c.entry > 0) || !(c.exit > 0)) continue;
+        if (Math.abs(c.exit / c.entry - 1) > 0.5) {
+          this.balance = round2(this.balance - c.pnl);
+          Object.assign(c, { result: 'void', pnl: 0, voidReason: 'liquidada com o preço de outro ativo (erro já corrigido); o valor foi devolvido' });
+          fixed++;
+        }
+      }
+      return fixed;
     }
 
     stats() { return summarize(this.closed); }

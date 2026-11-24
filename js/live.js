@@ -158,7 +158,16 @@
     }
   }
 
-  const api = { LiveFeed, mergeCandle, fromRest, fromWs, INTERVAL_MS, SYMBOLS, ASSETS, asset, label, checkAvailability };
+  /** Preço de abertura do minuto que contém `t` (erro de no máximo 1 minuto). null se ainda não existe. */
+  async function priceAt(symbol, t) {
+    const start = Math.floor(t / 60000) * 60000;
+    const res = await fetch(`${REST}?symbol=${symbol}&interval=1m&startTime=${start}&limit=1`);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const rows = await res.json();
+    return Array.isArray(rows) && rows.length && rows[0][0] === start ? +rows[0][1] : null;
+  }
+
+  const api = { LiveFeed, priceAt, mergeCandle, fromRest, fromWs, INTERVAL_MS, SYMBOLS, ASSETS, asset, label, checkAvailability };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Coldigo = Object.assign(root.Coldigo || {}, { Live: api });
 })(typeof self !== 'undefined' ? self : this);

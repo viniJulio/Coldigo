@@ -76,3 +76,16 @@ test('checkAvailability: ativo, inexistente, parado e rede fora', async () => {
   assert.deepEqual(r, { EURUSDT: true, GBPUSDT: false, AUDUSDT: false, USDTTRY: null });
   delete global.fetch;
 });
+
+test('priceAt: abertura do minuto do vencimento; null se o minuto ainda não existe', async () => {
+  const t = Date.UTC(2026, 10, 24, 6, 52, 30), start = Date.UTC(2026, 10, 24, 6, 52);
+  global.fetch = async url => {
+    const u = new URL(url);
+    assert.equal(+u.searchParams.get('startTime'), start);
+    assert.equal(u.searchParams.get('interval'), '1m');
+    return { ok: true, status: 200, json: async () => (u.searchParams.get('symbol') === 'ETHUSDT' ? [[start, '3561.10', '3562', '3560', '3561.5', '10']] : []) };
+  };
+  assert.equal(await L.priceAt('ETHUSDT', t), 3561.10);
+  assert.equal(await L.priceAt('BTCUSDT', t), null);
+  delete global.fetch;
+});
