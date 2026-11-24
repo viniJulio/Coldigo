@@ -7,6 +7,7 @@
     "start": "python3 -m http.server 8080",
     "test": "node --test test/*.test.js",
     "avaliar": "node scripts/avaliar.js",
-    "versao": "node scripts/versao.js"
+    "versao": "node scripts/versao.js",
+    "ponte": "node ponte/servidor.js"
   }
 }

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Coldigo — Análise gráfica day trade</title>
-  <link rel="stylesheet" href="css/style.css?v=2026-11-24.2">
+  <link rel="stylesheet" href="css/style.css?v=2026-11-24.6">
 </head>
 <body>
   <header class="topbar">
@@ -59,16 +59,39 @@
           <label for="sim-stake">Valor por operação (R$)</label>
           <input id="sim-stake" type="number" min="1" step="1" value="10">
         </div>
+        <div class="dur-form">
+          <label for="sim-duracao">Tempo da operação</label>
+          <select id="sim-duracao"></select>
+        </div>
+        <p class="note" id="sim-duracao-nota"></p>
         <div class="sim-buttons">
           <button class="btn call" id="sim-call" disabled>▲ CALL (acima)</button>
           <button class="btn put" id="sim-put" disabled>▼ PUT (abaixo)</button>
         </div>
         <p class="note" id="sim-hint">Ative o modo <b>Ao vivo</b> para operar no simulador.</p>
+        <p class="note" id="sim-venda-nota" hidden></p>
         <label class="chk"><input type="checkbox" id="sim-auto"> Entrar automaticamente nos sinais fortes</label>
         <label class="chk"><input type="checkbox" id="sim-sound" checked> Som e vibração nos alertas</label>
         <div id="sim-open"></div>
         <div id="sim-history"></div>
         <button class="btn small" id="sim-reset">Zerar simulador</button>
+      </div>
+
+      <div class="card" id="conta-card">
+        <h3>Conta demo da Binance</h3>
+        <div id="conta-status" class="conta-status off">Desconectada</div>
+        <div class="ponte-form">
+          <label for="ponte-url">Endereço da ponte</label><input id="ponte-url" type="text" inputmode="url" spellcheck="false" value="http://127.0.0.1:8787">
+          <label for="ponte-codigo">Código de acesso</label><input id="ponte-codigo" type="password" autocomplete="off" spellcheck="false" placeholder="mostrado na janela da ponte">
+        </div>
+        <div class="row-btns"><button class="btn small primary" id="ponte-conectar" type="button">Conectar</button><button class="btn small" id="ponte-desconectar" type="button" hidden>Desconectar</button></div>
+        <div id="conta-saldo"></div>
+        <div class="sim-form" id="ponte-opcoes" hidden>
+          <label for="ponte-valor">Valor por ordem (USDT)</label><input id="ponte-valor" type="number" min="5" step="1" value="20">
+        </div>
+        <label class="chk" id="ponte-enviar-wrap" hidden><input type="checkbox" id="ponte-enviar"> Enviar minhas entradas (COMPRAR e alertas) para a conta demo, com o tempo da operação escolhido no simulador</label>
+        <div id="conta-ops"></div>
+        <p class="note">A ponte roda no seu computador e guarda a chave da conta demo; este app nunca vê a chave. Como instalar: README, seção "Conta demo da Binance".</p>
       </div>
 
       <div id="sec-main"></div>
@@ -94,18 +117,20 @@
     <div id="trade-body" class="trade-body"></div>
     <div class="dlg-actions">
       <button class="btn" id="trade-chart" type="button">Ver no gráfico</button>
+      <button class="btn" id="trade-sell-now" type="button" hidden>Vender agora</button>
       <button class="btn primary" id="trade-close" type="button">Fechar</button>
     </div>
   </dialog>
 
-  <script>window.COLDIGO_VERSION = '2026-11-24.2';</script>
-  <script src="js/indicators.js?v=2026-11-24.2"></script>
-  <script src="js/forecast.js?v=2026-11-24.2"></script>
-  <script src="js/data.js?v=2026-11-24.2"></script>
-  <script src="js/live.js?v=2026-11-24.2"></script>
-  <script src="js/model.js?v=2026-11-24.2"></script>
-  <script src="js/sim.js?v=2026-11-24.2"></script>
-  <script src="js/chart.js?v=2026-11-24.2"></script>
-  <script src="js/app.js?v=2026-11-24.2"></script>
+  <script>window.COLDIGO_VERSION = '2026-11-24.6';</script>
+  <script src="js/indicators.js?v=2026-11-24.6"></script>
+  <script src="js/forecast.js?v=2026-11-24.6"></script>
+  <script src="js/data.js?v=2026-11-24.6"></script>
+  <script src="js/live.js?v=2026-11-24.6"></script>
+  <script src="js/model.js?v=2026-11-24.6"></script>
+  <script src="js/sim.js?v=2026-11-24.6"></script>
+  <script src="js/ponte.js?v=2026-11-24.6"></script>
+  <script src="js/chart.js?v=2026-11-24.6"></script>
+  <script src="js/app.js?v=2026-11-24.6"></script>
 </body>
 </html>

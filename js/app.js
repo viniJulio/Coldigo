@@ -5,7 +5,7 @@
 
   const params = { horizon: 12, simulations: 2000, window: 300, driftFactor: 0.1, tpAtr: 1.5, slAtr: 1, payout: 85, history: 6000, trainN: 2500, market: 'spot', feePct: 0.1 };
   const alertCfg = Object.assign({}, Sim.DEFAULT_CFG);
-  const prefs = { stake: 10, auto: false, sound: true };
+  const prefs = { stake: 10, auto: false, sound: true, ponteUrl: 'http://127.0.0.1:8787', ponteCodigo: '', ponteValor: 20, ponteEnviar: false };
   const state = { candles: [], analysis: null, source: '', live: null, liveLen: 0, alert: null, alertLog: [], bannerDismissed: null, research: null, pred: null, closedSince: 0, dec: 2 };
   const chart = new Chart($('chart'), $('tooltip'));
 
@@ -22,7 +22,7 @@
   const smoney = v => (v > 0 ? '+' : v < 0 ? '−' : '') + 'R$ ' + num(Math.abs(v));
   const z2 = v => String(v).padStart(2, '0');
   const hhmm = t => { const d = new Date(t); return `${z2(d.getHours())}:${z2(d.getMinutes())}`; };
-  const mmss = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${z2(s % 60)}`; };
+  const mmss = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return s >= 3600 ? `${Math.floor(s / 3600)}:${z2(Math.floor(s / 60) % 60)}:${z2(s % 60)}` : `${Math.floor(s / 60)}:${z2(s % 60)}`; };
   const isFee = () => params.market !== 'binary';
   const MARKET_TXT = { binary: 'Opção binária (payout fixo)', spot: 'Binance à vista (só compra)', futures: 'Binance futuros (compra e venda)' };
   const sideTxt = (s, mode) => ((mode || (isFee() ? 'fee' : 'binary')) === 'fee' ? (s === 'up' ? '▲ COMPRA' : '▼ VENDA') : (s === 'up' ? '▲ CALL' : '▼ PUT'));
@@ -56,6 +56,7 @@
       showError('');
       analyze(true);
       runResearch();
+      renderDuracoes();
     } catch (e) {
       showError(e.message);
     }
@@ -226,7 +227,7 @@
       analyze(reset);
       if (research) runResearch();
     };
-    bind('p-horizon', v => { params.horizon = Math.max(1, Math.min(60, Math.round(v))); }, reanalyze(true, true));
+    bind('p-horizon', v => { params.horizon = Math.max(1, Math.min(60, Math.round(v))); }, () => { reanalyze(true, true)(); renderDuracoes(); });
     bind('p-fee', v => { params.feePct = Math.max(0, Math.min(1, v)); }, reanalyze(false, true));
     $('p-market').addEventListener('change', e => {
       params.market = e.target.value;
@@ -332,7 +333,8 @@
   function fireAlert(res, last) {
     const label = state.live ? Live.label(state.live.symbol) + ' · ' + state.live.interval : state.source;
     const entry = { t: last.t + (state.live ? state.live.intervalMs : 0), side: res.side, label, auto: false };
-    if (prefs.auto && state.live && portfolio.open.length === 0) {
+    const abertas = prefs.ponteEnviar && conta.conectada ? conta.ops.filter(o => o.estado === 'aberta').length : portfolio.open.length;
+    if (prefs.auto && state.live && abertas === 0) {
       try { enterTrade(res.side, 'alerta'); entry.auto = true; } catch (e) { showError(e.message); }
     }
     state.alertLog.unshift(entry);
@@ -470,12 +472,50 @@
   function unlockScreen() { try { if (wake) wake.release(); } catch (_) { /* ignora */ } wake = null; }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && state.live) lockScreen(); });
 
+  // --- Tempo da operação ---
+  // O tempo é sempre múltiplo do candle do gráfico (o modelo prevê "daqui a H candles"). Ao trocar o
+  // tempo gráfico, o tempo da operação escolhido é mantido; se não couber, usa o mais próximo possível.
+  const DURACOES = [1, 2, 3, 5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240, 360, 480, 720, 1440, 2880];
+  const durTxt = m => (m < 60 ? `${m} min` : m % 1440 === 0 ? `${m / 1440} dia${m > 1440 ? 's' : ''}` : m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60} min`);
+  const ivMinOf = iv => Live.INTERVAL_MS[iv] / 60000;
+  const intervalMin = () => (state.live ? state.live.intervalMs / 60000 : state.analysis ? Math.max(1, Math.round(state.analysis.stepMs / 60000)) : 1);
+  const opcoesDuracao = iv => DURACOES.filter(d => d % iv === 0 && d / iv >= 1 && d / iv <= 60);
+  function maisProxima(dur, iv) {
+    const opts = opcoesDuracao(iv);
+    return opts.reduce((b, d) => (Math.abs(Math.log(d / dur)) < Math.abs(Math.log(b / dur)) ? d : b), opts[0]);
+  }
+
+  let avisoDuracao = '';
+  function renderDuracoes() {
+    const iv = intervalMin(), atual = params.horizon * iv, sel = $('sim-duracao');
+    const opts = opcoesDuracao(iv);
+    if (!opts.includes(atual)) { opts.push(atual); opts.sort((a, b) => a - b); } // tempo definido à mão em candles
+    sel.innerHTML = opts.map(d => `<option value="${d}"${d === atual ? ' selected' : ''}>${durTxt(d)} · ${d / iv} candle${d / iv > 1 ? 's' : ''}</option>`).join('');
+    $('sim-duracao-nota').textContent = `${avisoDuracao ? avisoDuracao + ' ' : ''}Cada operação termina ${durTxt(atual)} depois da entrada. O modelo e o alerta são validados para esse mesmo tempo.`;
+  }
+
+  function setHorizon(H) {
+    avisoDuracao = '';
+    params.horizon = Math.max(1, Math.min(60, Math.round(H)));
+    const inp = $('p-horizon'); if (inp) inp.value = params.horizon;
+    persist();
+    if (state.analysis) { try { analyze(true); runResearch(); } catch (e) { showError(e.message); } }
+    renderDuracoes(); renderSim();
+  }
+  $('sim-duracao').addEventListener('change', e => setHorizon(+e.target.value / intervalMin()));
+
   // --- Simulador ---
   function simReady() { return !!state.live && !!state.analysis && state.candles.length > 0; }
 
   function enterTrade(side, source) {
     if (!simReady()) throw new Error('Ative o modo Ao vivo para operar no simulador.');
     if (params.market === 'spot' && side === 'down') throw new Error('No mercado à vista só é possível comprar.');
+    if (prefs.ponteEnviar && conta.conectada) { // ordem real na conta DEMO, executada pela ponte
+      if (params.market !== 'spot') throw new Error('A conta demo é operada no mercado à vista: escolha "Binance à vista" em Parâmetros → Operação.');
+      if (side !== 'up') throw new Error('No mercado à vista só é possível comprar.');
+      enviarParaDemo(source);
+      return;
+    }
     const last = state.candles[state.candles.length - 1];
     portfolio.openTrade({
       side, price: last.c, t: Date.now(), stake: prefs.stake, payoutPct: params.payout, horizon: params.horizon,
@@ -506,7 +546,9 @@
   function syncMarkers() {
     const sym = state.live && state.live.symbol;
     const mk = t => ({ t: t.t, price: t.entry, side: t.side, result: t.result || 'open' });
-    chart.markers = sym ? portfolio.open.concat(portfolio.closed.slice(-60)).filter(t => t.symbol === sym).map(mk) : [];
+    const demo = (conta.ops || []).filter(o => o.symbol === sym && o.abertura && o.abertura.avgPrice).slice(-60)
+      .map(o => ({ t: o.abertura.t, price: o.abertura.avgPrice, side: 'up', result: o.estado === 'aberta' ? 'open' : o.resultadoUSDT > 0 ? 'win' : o.resultadoUSDT < 0 ? 'loss' : 'tie' }));
+    chart.markers = sym ? portfolio.open.concat(portfolio.closed.slice(-60)).filter(t => t.symbol === sym).map(mk).concat(demo) : [];
     chart.render();
   }
 
@@ -523,9 +565,16 @@
       (repaired ? `<p class="note warn-note" style="margin:6px 0 0">${repaired} operação(ões) anulada(s): tinham sido liquidadas com o preço de outro ativo, por um erro já corrigido. O valor foi devolvido.</p>` : '') +
       '<p class="note" style="margin:6px 0 0">Toque numa operação para ver os detalhes.</p>';
     const ready = simReady();
-    $('sim-call').textContent = isFee() ? '▲ COMPRAR' : '▲ CALL (acima)';
+    $('sim-call').textContent = prefs.ponteEnviar && conta.conectada ? '▲ COMPRAR (conta demo)' : isFee() ? '▲ COMPRAR' : '▲ CALL (acima)';
     $('sim-put').textContent = isFee() ? '▼ VENDER' : '▼ PUT (abaixo)';
     $('sim-call').disabled = !ready; $('sim-put').disabled = !ready || params.market === 'spot';
+    const nota = $('sim-venda-nota');
+    nota.hidden = params.market !== 'spot';
+    if (params.market === 'spot') {
+      nota.innerHTML = prefs.ponteEnviar && conta.conectada
+        ? 'VENDER fica bloqueado: a conta demo é operada no mercado à vista, onde só dá para comprar. A venda do que você comprou é automática no fim do tempo da operação.'
+        : 'VENDER fica bloqueado no mercado à vista: lá só dá para comprar, e a venda do que você comprou é automática no fim do tempo da operação. Para apostar na queda, use <button class="linklike" data-mercado="futures" type="button">Binance futuros</button> ou <button class="linklike" data-mercado="binary" type="button">opção binária</button>.';
+    }
     $('sim-hint').hidden = ready;
     renderTrades();
   }
@@ -597,6 +646,7 @@
     $('trade-body').innerHTML = body;
     const canChart = state.live && state.live.symbol === t.symbol && state.candles.length && t.t >= state.candles[0].t;
     $('trade-chart').hidden = !canChart;
+    $('trade-sell-now').hidden = true;
     $('trade-dialog').showModal();
   }
 
@@ -627,6 +677,13 @@
   $('sim-auto').addEventListener('change', e => { prefs.auto = e.target.checked; persist(); if (prefs.auto) ensureAudio(); });
   $('sim-sound').addEventListener('change', e => { prefs.sound = e.target.checked; persist(); if (prefs.sound) ensureAudio(); });
   const manual = side => () => { ensureAudio(); try { showError(''); enterTrade(side, 'manual'); } catch (err) { showError(err.message); } };
+  $('sim-venda-nota').addEventListener('click', e => {
+    const m = e.target.dataset && e.target.dataset.mercado;
+    if (!m) return;
+    const sel = $('p-market');
+    sel.value = m;
+    sel.dispatchEvent(new Event('change'));
+  });
   $('sim-call').addEventListener('click', manual('up'));
   $('sim-put').addEventListener('click', manual('down'));
   $('sim-reset').addEventListener('click', () => {
@@ -689,7 +746,7 @@
     pill.textContent = `ao vivo · candle fecha em ${mmss(last.t + state.live.intervalMs - Date.now())}`;
   }
 
-  function tick() { tickCountdown(); settleNow(); renderTrades(); }
+  function tick() { tickCountdown(); settleNow(); renderTrades(); if (conta.conectada) renderConta(); }
 
   function runLive(closed) {
     clearTimeout(pendingTimer); pendingTimer = null; lastRun = Date.now();
@@ -714,6 +771,7 @@
     if (info.reset) {
       state.liveLen = candles.length; showError('');
       try { analyze(true); runResearch(); } catch (e) { showError(e.message); }
+      renderDuracoes();
       lastRun = Date.now(); syncMarkers(); renderSim(); return;
     }
     // reanalisa no máximo 1x por segundo, e na hora ao fechar um candle (é quando o alerta é avaliado)
@@ -745,7 +803,22 @@
   }
 
   liveBtn.addEventListener('click', () => (state.live ? stopLive() : startLive()));
-  [symSel, intSel].forEach(el => el.addEventListener('change', () => { if (state.live) startLive(); }));
+  symSel.addEventListener('change', () => { if (state.live) startLive(); });
+  let ivAnterior = intSel.value;
+  intSel.addEventListener('change', () => {
+    if (state.live) {
+      const dur = params.horizon * ivMinOf(ivAnterior), iv = ivMinOf(intSel.value);
+      let H = dur / iv;
+      if (!(Number.isInteger(H) && H >= 1 && H <= 60)) {
+        const d = maisProxima(dur, iv);
+        H = d / iv;
+        avisoDuracao = `O tempo de ${durTxt(dur)} não cabe em candles de ${durTxt(iv)}; ajustei para ${durTxt(d)}.`;
+      }
+      params.horizon = H; const inp = $('p-horizon'); if (inp) inp.value = H; persist();
+      startLive();
+    }
+    ivAnterior = intSel.value;
+  });
   if (window.COLDIGO_NO_LIVE) $('live-controls').hidden = true;
 
   // --- Entradas ---
@@ -783,6 +856,153 @@
     try { load(Data.parseCSV(await f.text()), f.name); } catch (err) { showError(err.message); }
   });
 
+  // --- Conta demo da Binance (via ponte local) ---
+  const { PonteCliente } = window.Coldigo;
+  const conta = { ponte: null, conectada: false, status: null, saldos: [], ops: [], erro: null, timer: null, saldoEm: 0 };
+  const usdt = (v, d = 4) => (v == null ? '–' : (v > 0 ? '+' : v < 0 ? '−' : '') + num(Math.abs(v), d) + ' USDT');
+  const MOTIVO_TXT = { vencimento: 'vendida no vencimento', 'fechada manualmente': 'vendida manualmente', 'vencida com a ponte desligada': 'vendida ao religar a ponte (venceu com ela desligada)' };
+
+  async function conectarPonte() {
+    conta.ponte = new PonteCliente.Ponte(prefs.ponteUrl, prefs.ponteCodigo);
+    conta.erro = null; renderConta('conectando');
+    try {
+      const st = await conta.ponte.status();
+      conta.status = st;
+      if (!st.ok) throw new Error(st.erro || 'a ponte não conseguiu falar com a Binance.');
+      conta.conectada = true; conta.saldoEm = 0;
+      await atualizarConta();
+      clearInterval(conta.timer); conta.timer = setInterval(atualizarConta, 10000);
+    } catch (e) { conta.conectada = false; conta.erro = e.message; }
+    renderConta(); renderSim();
+  }
+
+  function desconectarPonte() {
+    clearInterval(conta.timer);
+    Object.assign(conta, { conectada: false, status: null, saldos: [], ops: [], erro: null });
+    renderConta(); renderSim(); syncMarkers();
+  }
+
+  async function atualizarConta() {
+    if (!conta.ponte || !conta.conectada) return;
+    try {
+      conta.ops = (await conta.ponte.operacoes()).operacoes || [];
+      if (Date.now() - conta.saldoEm > 30000) { conta.saldos = (await conta.ponte.saldo()).saldos || []; conta.saldoEm = Date.now(); }
+      conta.erro = null;
+    } catch (e) { conta.erro = e.message; }
+    renderConta(); syncMarkers();
+  }
+
+  async function enviarParaDemo(source) {
+    const d = decisionState();
+    const body = {
+      symbol: state.live.symbol, valorUSDT: prefs.ponteValor, duracaoMs: params.horizon * state.live.intervalMs, origem: source,
+      contexto: { p: state.pred ? state.pred.p : null, decision: d.kind, text: d.text, interval: state.live.interval, horizon: params.horizon }
+    };
+    $('conta-status').textContent = 'Enviando a ordem à conta demo…';
+    try {
+      const { operacao } = await conta.ponte.abrir(body);
+      conta.ops.push(operacao); conta.saldoEm = 0;
+      showError('');
+    } catch (e) { showError('Conta demo: ' + e.message); }
+    renderConta(); syncMarkers();
+  }
+
+  function renderConta(fase) {
+    const st = $('conta-status');
+    if (fase === 'conectando') { st.className = 'conta-status warn'; st.textContent = 'Conectando à ponte…'; return; }
+    if (conta.conectada) {
+      const c = conta.status || {};
+      st.className = 'conta-status ' + (conta.erro ? 'warn' : 'on');
+      st.textContent = conta.erro ? 'Conectada, mas com problema: ' + conta.erro
+        : `Conectada · conta DEMO${c.conta && c.conta.podeNegociar === false ? ' · a chave não tem permissão de negociar' : ''} · limite de ${num(c.limitePorOrdemUSDT || 0, 0)} USDT por ordem`;
+    } else {
+      st.className = 'conta-status ' + (conta.erro ? 'err' : 'off');
+      st.textContent = conta.erro ? 'Não conectada: ' + conta.erro : 'Desconectada';
+    }
+    $('ponte-conectar').hidden = conta.conectada; $('ponte-desconectar').hidden = !conta.conectada;
+    $('ponte-opcoes').hidden = !conta.conectada; $('ponte-enviar-wrap').hidden = !conta.conectada;
+    $('conta-saldo').innerHTML = !conta.conectada ? '' : '<div class="trades"><h4>Saldo da conta demo</h4>' +
+      (conta.saldos.length ? conta.saldos.slice(0, 8).map(b => `<div class="row"><span>${b.moeda}</span><b>${num(b.livre, b.moeda === 'USDT' ? 2 : 6)}${b.travado ? ` (+${num(b.travado, 6)} em ordens)` : ''}</b></div>`).join('') : '<p class="note">Sem saldo.</p>') + '</div>';
+    if (!conta.conectada) { $('conta-ops').innerHTML = ''; return; }
+    const now = Date.now(), r = PonteCliente.resumo(conta.ops);
+    const linhas = conta.ops.slice(-10).reverse().map(o => {
+      const cls = o.resultadoUSDT > 0 ? 'pos' : o.resultadoUSDT < 0 ? 'neg' : '';
+      const estado = o.estado === 'aberta' ? (o.vencimento > now ? mmss(o.vencimento - now) : 'vendendo…') : o.estado === 'erro' ? 'erro' : '';
+      return `<div class="tr click demo" data-demo-id="${o.id}" role="button" tabindex="0" aria-label="Detalhes da operação ${o.id} na conta demo"><span>${o.abertura ? hhmm(o.abertura.t) : '–'}</span><span>${Live.label(o.symbol)}</span><span>${num(o.valorUSDT, 2)} USDT ${estado}</span><span class="${cls}">${o.resultadoUSDT != null ? usdt(o.resultadoUSDT) : ''}</span></div>`;
+    }).join('');
+    $('conta-ops').innerHTML = `<div class="trades"><h4>Operações na conta demo</h4>${linhas || '<p class="note">Nenhuma ainda. Marque "Enviar minhas entradas" e use COMPRAR, ou deixe a entrada automática nos alertas.</p>'}</div>` +
+      (r.fechadas ? `<p class="note" style="margin:6px 0 0">${r.fechadas} encerrada(s): resultado real ${usdt(r.soma)}, ${pct(r.comLucro)} com lucro, ${num(r.taxas, 4)} USDT em taxas. Toque numa operação para ver os detalhes.</p>` : '');
+  }
+
+  function showDemoDetails(id) {
+    const o = conta.ops.find(x => x.id === id);
+    if (!o) return;
+    detailId = null;
+    const a = o.abertura || {}, f = o.fechamento, dec = (Live.asset(o.symbol) || { dec: 2 }).dec;
+    const pr = v => (v == null ? '–' : num(v, dec));
+    const taxas = s => [s.feeBase ? `${num(s.feeBase, 8)} ${o.base || ''}` : '', s.feeQuote ? `${num(s.feeQuote, 4)} USDT` : '', ...Object.entries(s.feeOther || {}).map(([k, v]) => `${num(v, 8)} ${k}`)].filter(Boolean).join(' + ') || '0';
+    const status = o.estado === 'aberta' ? ['Em andamento', ''] : o.estado === 'erro' ? ['Erro', 'warn'] : o.resultadoUSDT > 0 ? ['Lucro', 'pos'] : o.resultadoUSDT < 0 ? ['Prejuízo', 'neg'] : ['Empate', ''];
+    const r = (k, v) => `<div class="row"><span>${k}</span><b>${v}</b></div>`;
+    let body = `<h3>Conta demo nº ${o.id} · ▲ COMPRA <span class="badge ${status[1]}">${status[0]}</span></h3>`;
+    body += r('Ativo', `${Live.label(o.symbol)} (${o.symbol})`);
+    body += r('Onde', 'conta DEMO da Binance, ordem a mercado');
+    body += r('Origem', o.origem === 'alerta' ? 'alerta de sinal validado' : 'entrada manual');
+    body += r('Valor enviado', `${num(o.valorUSDT, 2)} USDT`);
+    body += `<h4>Compra · ordem nº ${a.orderId != null ? a.orderId : '–'}</h4>`;
+    body += r('Executada', `${num(a.qty || 0, 8)} ${o.base || ''} a ${pr(a.avgPrice)} (média)`);
+    body += r('Pago', `${num(a.quote || 0, 4)} USDT · ${a.t ? when(a.t) : '–'}`);
+    body += r('Taxa da compra', taxas(a));
+    body += r('Vencimento', when(o.vencimento));
+    if (f) {
+      body += `<h4>Venda · ordem nº ${f.orderId != null ? f.orderId : '–'}</h4>`;
+      body += r('Executada', `${num(f.qty, 8)} ${o.base || ''} a ${pr(f.avgPrice)} (média)`);
+      body += r('Recebido', `${num(f.quote, 4)} USDT · ${when(f.t)}`);
+      body += r('Taxa da venda', taxas(f));
+      if (f.sobra > 0) body += r('Sobra que não pôde ser vendida', `${num(f.sobra, 8)} ${o.base || ''} (abaixo do passo mínimo do par; fica na conta)`);
+      body += r('Como foi vendida', MOTIVO_TXT[o.motivo] || o.motivo || '–');
+      body += r('Variação do preço', pctp(f.avgPrice / a.avgPrice - 1));
+      body += r('Taxas totais (em USDT)', num(o.taxasUSDT || 0, 4));
+      body += r('Resultado real', `<span class="${o.resultadoUSDT > 0 ? 'pos' : o.resultadoUSDT < 0 ? 'neg' : ''}">${usdt(o.resultadoUSDT)} (${pctp(o.resultadoUSDT / a.quote)} do valor)</span>`);
+    } else {
+      body += r('Tempo restante', o.vencimento > Date.now() ? mmss(o.vencimento - Date.now()) : 'vendendo…');
+      const live = state.live && state.live.symbol === o.symbol && state.candles.length ? state.candles[state.candles.length - 1].c : null;
+      if (live && a.avgPrice) body += r('Preço agora', `${pr(live)} (${pctp(live / a.avgPrice - 1)} desde a compra, antes das taxas)`);
+    }
+    if (o.erro) body += r('Último problema', o.erro);
+    if (o.contexto) {
+      const c = o.contexto;
+      body += '<h4>Na hora da entrada</h4>';
+      if (c.p != null) body += r('Modelo', `▲ ${pct(c.p)} · ▼ ${pct(1 - c.p)}`);
+      body += `<p class="note">${c.decision === 'call' || c.decision === 'put' ? 'Havia sinal validado.' : 'Não havia sinal validado' + (c.text ? ': ' + c.text.replace(/^NÃO OPERAR · /, '') : '.')}</p>`;
+    }
+    $('trade-body').innerHTML = body;
+    $('trade-chart').hidden = true;
+    const sell = $('trade-sell-now');
+    sell.hidden = o.estado !== 'aberta'; sell.dataset.demoId = o.id; sell.disabled = false;
+    $('trade-dialog').showModal();
+  }
+
+  $('trade-sell-now').addEventListener('click', async e => {
+    const id = +e.target.dataset.demoId;
+    e.target.disabled = true;
+    try { await conta.ponte.fechar(id); conta.saldoEm = 0; await atualizarConta(); showDemoDetails(id); }
+    catch (err) { showError('Conta demo: ' + err.message); e.target.disabled = false; }
+  });
+  $('conta-ops').addEventListener('click', e => { const r = e.target.closest('[data-demo-id]'); if (r) showDemoDetails(+r.dataset.demoId); });
+  $('conta-ops').addEventListener('keydown', e => { const r = e.target.closest('[data-demo-id]'); if (r && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showDemoDetails(+r.dataset.demoId); } });
+  $('ponte-url').value = prefs.ponteUrl;
+  $('ponte-codigo').value = prefs.ponteCodigo;
+  $('ponte-valor').value = prefs.ponteValor;
+  $('ponte-enviar').checked = !!prefs.ponteEnviar;
+  $('ponte-conectar').addEventListener('click', () => {
+    prefs.ponteUrl = $('ponte-url').value.trim() || 'http://127.0.0.1:8787';
+    prefs.ponteCodigo = $('ponte-codigo').value.trim();
+    persist(); conectarPonte();
+  });
+  $('ponte-desconectar').addEventListener('click', desconectarPonte);
+  $('ponte-valor').addEventListener('change', e => { const v = parseFloat(e.target.value); if (v > 0) { prefs.ponteValor = v; persist(); } else e.target.value = prefs.ponteValor; });
+  $('ponte-enviar').addEventListener('change', e => { prefs.ponteEnviar = e.target.checked; persist(); renderSim(); });
+
   // --- Versão e aviso de atualização ---
   $('app-version').textContent = window.COLDIGO_VERSION ? 'versão ' + window.COLDIGO_VERSION : '';
   async function checkUpdate() {
@@ -803,5 +1023,6 @@
   renderSim();
   demo();
   settleNow();
+  if (prefs.ponteCodigo && !window.COLDIGO_NO_LIVE) conectarPonte(); // reconecta à ponte ao abrir
   window.__coldigo = { state, chart, load, portfolio: () => portfolio, enterTrade, prefs, alertCfg };
 })();

@@ -52,6 +52,10 @@ Avaliação walk-forward com dados reais da Binance, protocolo fixado antes de v
 
 Conclusão prática: nestes dados, de 1 minuto a 24 horas, com payout ou com taxas, o modelo não achou vantagem real. Qualquer mudança no modelo a partir daqui precisa ser validada em dados **posteriores** a esta avaliação (por exemplo, no simulador em tempo real), senão vira ajuste ao que já foi visto.
 
+### Tempo da operação
+
+No simulador, **Tempo da operação** escolhe quanto tempo cada operação dura (de 1 minuto a alguns dias). As opções são múltiplos do candle do gráfico aberto, porque o modelo prevê "daqui a N candles". Ao trocar o tempo gráfico, o tempo escolhido é mantido; se ele não couber (30 minutos num gráfico de 4 horas), o app usa o mais próximo e avisa. O modelo, o alerta, o simulador e as ordens da conta demo usam esse mesmo tempo.
+
 ### Binance: operar com taxas
 
 Em **Parâmetros → Operação**, escolha o mercado: **opção binária** (payout fixo), **Binance à vista** (só compra) ou **Binance futuros** (compra e venda), e a **taxa por lado** (padrão 0,1% à vista e 0,05% em futuros; confira as da sua conta). No modo Binance:
@@ -66,6 +70,30 @@ Em **Parâmetros → Operação**, escolha o mercado: **opção binária** (payo
 Carteira fictícia (R$ 1.000 iniciais) de opções binárias, no modo ao vivo: **CALL** (acima) ou **PUT** (abaixo), valor por operação, payout e expiração configuráveis. A operação entra ao preço atual e é liquidada no vencimento (vitória paga o payout, derrota perde o valor, empate devolve). Há opção de entrar automaticamente nos alertas. Cada operação é liquidada com o preço **do próprio ativo**: ao vivo no vencimento, ou, se o app estava fechado ou em outro ativo, pela abertura do minuto do vencimento consultada na Binance (nunca com os candles de outro ativo ou da demonstração). Toque numa operação para ver os detalhes: ativo, mercado, taxa ou payout, entrada, vencimento, saída e como o preço foi obtido, variação, resultado e o que o modelo dizia na hora da entrada. Entradas aparecem como triângulos no gráfico e o saldo, as operações e as preferências ficam salvos no navegador. O acerto só significa algo com muitas operações (100 ou mais) e deve ser comparado com o ponto de empate. Operar no simulador em tempo real é o teste fora da amostra que o backtest não consegue ser.
 
 Para o câmbio real (feed da corretora ou do MetaTrader), exporte o histórico em CSV e carregue pelo botão **Carregar CSV**: o modelo valida do mesmo jeito, só que sem o fluxo de ordens, que o CSV não traz.
+
+### Conta demo da Binance (ponte local, Windows)
+
+O app pode enviar as suas entradas (o botão COMPRAR e os alertas) para a **conta demo** da Binance e mostrar saldo, ordens executadas, taxas e o resultado real. Quem fala com a Binance é a **ponte**, um pequeno programa que roda no seu computador:
+
+- guarda a chave da conta demo em `ponte/config.json`, que nunca vai para o Git nem para o app;
+- só escuta no próprio PC (`127.0.0.1`), só atende quem tem o **código de acesso** e vem do seu app, e só fala com a conta **demo**;
+- compra a mercado e **vende sozinha no vencimento**, mesmo com o navegador fechado (o PC e a ponte precisam estar ligados; se ela estiver desligada no vencimento, vende assim que religar);
+- tem limite de valor por ordem (padrão 100 USDT, ajustável em `ponte/config.json`).
+
+**Instalação (uma vez):**
+
+1. Instale o **Node.js LTS** em [nodejs.org](https://nodejs.org) (avançar, avançar, concluir).
+2. Baixe o projeto: no GitHub, **Code → Download ZIP**, e extraia (por exemplo em `Documentos\Coldigo`).
+3. Na Binance, entre na **Demo Trading** e crie uma **chave de API** do tipo gerado pelo sistema (HMAC), com permissão de leitura e de negociação à vista. Nunca habilite saques. Copie a *API Key* e a *Secret Key*.
+4. Dê dois cliques em `ponte\iniciar.bat`. Na primeira vez ele cria `ponte\config.json` e avisa que falta a chave. Feche a janela, abra `ponte\config.json` no Bloco de Notas e cole as chaves entre as aspas de `"apiKey"` e `"secretKey"`. Salve.
+
+**Uso:**
+
+1. Dois cliques em `ponte\iniciar.bat` e deixe a janela aberta. Ela mostra o **código de acesso**.
+2. No navegador **do mesmo PC**, abra o app, vá ao cartão **Conta demo da Binance**, confira o endereço `http://127.0.0.1:8787`, cole o código e toque em **Conectar**. Se o navegador perguntar se o site pode acessar a rede local ou outros apps do dispositivo, permita.
+3. Escolha **Binance à vista** em Parâmetros, ligue o **Ao vivo**, marque **Enviar minhas entradas para a conta demo** e defina o valor por ordem em USDT. A partir daí, COMPRAR e os alertas (com entrada automática) viram ordens na conta demo. Toque numa operação para ver compra, venda, taxas e resultado; "Vender agora" encerra antes do vencimento.
+
+Limitações: só mercado à vista (compra e depois vende); a ponte só é alcançável pelo navegador do próprio PC; a Binance cobra a taxa da compra na moeda comprada e só vende em passos mínimos (no BTC, 0,00001), então quase toda operação deixa uma pequena **sobra** na conta, que o resultado conta pelo valor de mercado (em ordens pequenas ela pesa: numa ordem de 20 USDT pode chegar a ~3%). Segundo a própria Binance, os preços e o livro de ofertas da demo são parecidos com os reais, não idênticos.
 
 ### Versões e atualização
 
@@ -84,7 +112,7 @@ CSV com data/hora, abertura, máxima, mínima, fechamento e volume. Aceita `,` `
 | **Alvo × stop** | Alvo e stop em múltiplos do ATR(14); mede quantas trajetórias tocam o alvo, o stop ou nenhum dentro do horizonte (empate no mesmo candle conta como stop). |
 | **Backtest walk-forward** | Para cada candle do histórico compara o score com o retorno `horizonte` candles depois, sem atravessar pregões. Mostra taxa de acerto e retorno médio por faixa de score. |
 
-Indicadores são causais (nenhum usa candles futuros). Os arquivos estão em `js/`: `indicators.js`, `forecast.js`, `data.js`, `live.js`, `model.js`, `sim.js`, `chart.js`, `app.js`.
+Indicadores são causais (nenhum usa candles futuros). Os arquivos estão em `js/`: `indicators.js`, `forecast.js`, `data.js`, `live.js`, `model.js`, `sim.js`, `ponte.js`, `chart.js`, `app.js`; a ponte local fica em `ponte/`.
 
 ## Limites que você deve conhecer
 
