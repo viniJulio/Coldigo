@@ -82,6 +82,12 @@ Carteira fictícia (R$ 1.000 iniciais) de opções binárias, no modo ao vivo: *
 
 Para o câmbio real (feed da corretora ou do MetaTrader), exporte o histórico em CSV e carregue pelo botão **Carregar CSV**: o modelo valida do mesmo jeito, só que sem o fluxo de ordens, que o CSV não traz.
 
+### Teste automático
+
+Para medir a assertividade com regras fixas, o cartão **Teste automático** cria um plano com a configuração aberta (ativo, tempo gráfico, tempo da operação e mercado), uma **probabilidade mínima a favor** (padrão 53%) e uma **meta de operações** (padrão 200). A cada candle fechado, o simulador entra sozinho quando o modelo passa do limite para um lado, uma operação por vez, no horário oficial de fechamento do candle (o vencimento cai no fechamento de um candle futuro e a próxima entrada pode acontecer nele). Só no simulador, nunca na conta demo.
+
+O plano não muda no meio: se o ativo, o tempo ou o mercado mudarem, o teste pausa; o Ao vivo desligado também pausa. Enquanto ele roda, a entrada automática dos alertas fica desligada, para não misturar regras. O cartão mostra candles avaliados, entradas, vezes em que o modelo ficou abaixo do limite, acerto com intervalo de 95%, ponto de empate, resultado e calibração, só das operações do teste.
+
 ### Desempenho das suas entradas
 
 O cartão **Desempenho das suas entradas** mede a assertividade das operações encerradas no simulador: acerto com **intervalo de 95%** (para saber se já dá para concluir algo), ponto de empate do payout, resultado, acerto com e sem sinal validado, a favor e contra o modelo, **calibração** (quando o modelo dava 55%, 60%…, quanto acertou de fato) e por ativo. **Exportar operações (CSV)** baixa todas as operações, com a probabilidade do modelo na hora de cada entrada, para análise em planilha.

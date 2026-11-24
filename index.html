@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Coldigo — Análise gráfica day trade</title>
-  <link rel="stylesheet" href="css/style.css?v=2026-11-24.9">
+  <link rel="stylesheet" href="css/style.css?v=2026-11-24.10">
 </head>
 <body>
   <header class="topbar">
@@ -77,6 +77,18 @@
         <button class="btn small" id="sim-reset">Zerar simulador</button>
       </div>
 
+      <div class="card" id="teste-card">
+        <h3>Teste automático · só no simulador</h3>
+        <div id="teste-status" class="conta-status off">Nenhum teste em andamento.</div>
+        <div class="ponte-form" id="teste-form">
+          <label for="teste-limiar">Probabilidade mínima a favor (%)</label><input id="teste-limiar" type="number" min="50" max="80" step="0.5" value="53">
+          <label for="teste-meta">Meta de operações</label><input id="teste-meta" type="number" min="30" max="2000" step="10" value="200">
+        </div>
+        <div class="row-btns"><button class="btn small primary" id="teste-iniciar" type="button">Iniciar teste com a configuração atual</button><button class="btn small" id="teste-encerrar" type="button" hidden>Encerrar teste</button></div>
+        <div id="teste-resultado"></div>
+        <p class="note">O teste usa o ativo, o tempo gráfico, o tempo da operação e o mercado abertos agora, e não muda no meio: se você trocar algo, ele pausa. A cada candle fechado, entra sozinho quando o modelo passa do limite para um lado, uma operação por vez. Deixe esta aba aberta com o Ao vivo ligado.</p>
+      </div>
+
       <div class="card" id="desempenho-card">
         <h3>Desempenho das suas entradas</h3>
         <div id="desempenho"></div>
@@ -128,16 +140,16 @@
     </div>
   </dialog>
 
-  <script>window.COLDIGO_VERSION = '2026-11-24.9';</script>
-  <script src="js/indicators.js?v=2026-11-24.9"></script>
-  <script src="js/forecast.js?v=2026-11-24.9"></script>
-  <script src="js/data.js?v=2026-11-24.9"></script>
-  <script src="js/live.js?v=2026-11-24.9"></script>
-  <script src="js/forex.js?v=2026-11-24.9"></script>
-  <script src="js/model.js?v=2026-11-24.9"></script>
-  <script src="js/sim.js?v=2026-11-24.9"></script>
-  <script src="js/ponte.js?v=2026-11-24.9"></script>
-  <script src="js/chart.js?v=2026-11-24.9"></script>
-  <script src="js/app.js?v=2026-11-24.9"></script>
+  <script>window.COLDIGO_VERSION = '2026-11-24.10';</script>
+  <script src="js/indicators.js?v=2026-11-24.10"></script>
+  <script src="js/forecast.js?v=2026-11-24.10"></script>
+  <script src="js/data.js?v=2026-11-24.10"></script>
+  <script src="js/live.js?v=2026-11-24.10"></script>
+  <script src="js/forex.js?v=2026-11-24.10"></script>
+  <script src="js/model.js?v=2026-11-24.10"></script>
+  <script src="js/sim.js?v=2026-11-24.10"></script>
+  <script src="js/ponte.js?v=2026-11-24.10"></script>
+  <script src="js/chart.js?v=2026-11-24.10"></script>
+  <script src="js/app.js?v=2026-11-24.10"></script>
 </body>
 </html>
