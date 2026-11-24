@@ -783,6 +783,22 @@
     try { load(Data.parseCSV(await f.text()), f.name); } catch (err) { showError(err.message); }
   });
 
+  // --- Versão e aviso de atualização ---
+  $('app-version').textContent = window.COLDIGO_VERSION ? 'versão ' + window.COLDIGO_VERSION : '';
+  async function checkUpdate() {
+    if (location.protocol === 'file:' || window.COLDIGO_NO_LIVE || !window.COLDIGO_VERSION) return;
+    try {
+      const res = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+      if (!res.ok) return;
+      const { version } = await res.json();
+      $('update-banner').hidden = !version || version === window.COLDIGO_VERSION;
+    } catch (_) { /* sem rede: tenta depois */ }
+  }
+  $('btn-update').addEventListener('click', () => location.reload());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(); });
+  setInterval(checkUpdate, 5 * 60000);
+  checkUpdate();
+
   renderParams();
   renderSim();
   demo();
