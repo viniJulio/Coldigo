@@ -142,3 +142,12 @@ tr.gate td { font-weight: 600; background: color-mix(in srgb, var(--accent) 10%,
 
 .asset-note { padding: 8px 12px; font-size: 12.5px; color: var(--warn); border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--warn) 8%, var(--panel)); }
 .asset-note[hidden] { display: none; }
+
+.trades .tr.click { cursor: pointer; border-radius: 6px; }
+.trades .tr.click:hover, .trades .tr.click:focus-visible { background: color-mix(in srgb, var(--accent) 10%, transparent); outline: none; }
+.trade-body h3 { margin: 0 0 10px; font-size: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.trade-body h4 { margin: 14px 0 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.trade-body .row b { text-align: right; }
+.badge { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+.badge.pos { color: var(--up); border-color: var(--up); } .badge.neg { color: var(--down); border-color: var(--down); } .badge.warn { color: var(--warn); border-color: var(--warn); }
+.warn-note { color: var(--warn); }

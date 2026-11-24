@@ -36,6 +36,7 @@
   };
   const saved = store.get() || {};
   let portfolio = new Sim.Portfolio(saved.portfolio);
+  const repaired = portfolio.repair(); // anula operações liquidadas com preço de outro ativo (erro antigo)
   let tests = Array.isArray(saved.tests) ? saved.tests : [];
   Object.assign(prefs, saved.prefs);
   Object.assign(alertCfg, saved.alertCfg);
@@ -478,17 +479,29 @@
     const last = state.candles[state.candles.length - 1];
     portfolio.openTrade({
       side, price: last.c, t: Date.now(), stake: prefs.stake, payoutPct: params.payout, horizon: params.horizon,
-      feePct: isFee() ? params.feePct : undefined,
+      feePct: isFee() ? params.feePct : undefined, interval: state.live.interval,
+      context: (() => { const d = decisionState(); return { p: state.pred ? state.pred.p : null, decision: d.kind, text: d.text, market: params.market }; })(),
       intervalMs: state.live.intervalMs, symbol: state.live.symbol, source
     });
     persist(); syncMarkers(); renderSim();
   }
 
+  // No vencimento, liquida pelo preço ao vivo só as operações do ativo aberto. As demais (outro ativo,
+  // app fechado no vencimento) usam o preço do próprio ativo no minuto do vencimento, consultado na Binance.
+  const lookups = new Map();
   function settleNow() {
-    if (!portfolio.open.length || !state.candles.length) return;
-    const done = portfolio.settle(state.candles, Date.now());
-    if (done.length) { persist(); syncMarkers(); renderSim(); }
+    if (!portfolio.open.length) return;
+    const now = Date.now(), sym = state.live && liveStatus === 'live' ? state.live.symbol : null;
+    if (sym && state.candles.length && portfolio.settle(state.candles, now, sym).length) { persist(); syncMarkers(); renderSim(); }
+    for (const tr of portfolio.needsLookup(now, sym)) {
+      if (!tr.symbol || now - (lookups.get(tr.id) || 0) < 60000) continue;
+      lookups.set(tr.id, now);
+      Live.priceAt(tr.symbol, tr.expiry).then(price => {
+        if (price != null && portfolio.settleAt(tr.id, price, 'minute')) { lookups.delete(tr.id); persist(); syncMarkers(); renderSim(); }
+      }).catch(() => { /* sem rede: tenta de novo em 1 minuto */ });
+    }
   }
+  setInterval(settleNow, 15000);
 
   function syncMarkers() {
     const sym = state.live && state.live.symbol;
@@ -506,7 +519,9 @@
       `<div class="row"><span>Operações encerradas</span><b>${st.trades}</b></div>` +
       (isFee() ? `<div class="row"><span>Operações com lucro líquido</span><b>${pct(st.winRate)}</b></div>`
         : `<div class="row"><span>Acerto (ponto de empate ${pct(be)})</span><b>${pct(st.winRate)}</b></div>`) +
-      (st.trades < 100 ? '<p class="note" style="margin:6px 0 0">Com menos de 100 operações o acerto ainda oscila demais. Acumule bastante antes de tirar conclusões.</p>' : '');
+      (st.trades < 100 ? '<p class="note" style="margin:6px 0 0">Com menos de 100 operações o acerto ainda oscila demais. Acumule bastante antes de tirar conclusões.</p>' : '') +
+      (repaired ? `<p class="note warn-note" style="margin:6px 0 0">${repaired} operação(ões) anulada(s): tinham sido liquidadas com o preço de outro ativo, por um erro já corrigido. O valor foi devolvido.</p>` : '') +
+      '<p class="note" style="margin:6px 0 0">Toque numa operação para ver os detalhes.</p>';
     const ready = simReady();
     $('sim-call').textContent = isFee() ? '▲ COMPRAR' : '▲ CALL (acima)';
     $('sim-put').textContent = isFee() ? '▼ VENDER' : '▼ PUT (abaixo)';
@@ -517,16 +532,90 @@
 
   function renderTrades() {
     const now = Date.now();
+    const row = t => `class="tr click${t.result ? '' : ' open'}" data-id="${t.id}" role="button" tabindex="0" aria-label="Detalhes da operação ${t.id}"`;
     const open = portfolio.open.map(t =>
-      `<div class="tr open"><span>${hhmm(t.t)}</span><span>${sideTxt(t.side, t.mode || 'binary')}</span><span>${px(t.entry)} · ${money(t.stake)}</span><span>${mmss(t.expiry - now)}</span></div>`).join('');
+      `<div ${row(t)}><span>${hhmm(t.t)}</span><span>${sideTxt(t.side, t.mode || 'binary')}</span><span>${pxOf(t, t.entry)} · ${money(t.stake)}</span><span>${t.expiry > now ? mmss(t.expiry - now) : 'liquidando…'}</span></div>`).join('');
     $('sim-open').innerHTML = open ? `<div class="trades"><h4>Em andamento</h4>${open}</div>` : '';
     const closed = portfolio.closed.slice(-8).reverse().map(t => {
       const cls = t.result === 'win' ? 'pos' : t.result === 'loss' ? 'neg' : '';
-      const mark = t.result === 'win' ? '✓' : t.result === 'loss' ? '✗' : '=';
-      return `<div class="tr"><span>${hhmm(t.t)}</span><span>${sideTxt(t.side, t.mode || 'binary')}</span><span>${px(t.entry)} → ${px(t.exit)}${t.approx ? ' (aprox.)' : ''}</span><span class="${cls}">${mark} ${smoney(t.pnl)}</span></div>`;
+      const mark = t.result === 'win' ? '✓' : t.result === 'loss' ? '✗' : t.result === 'void' ? '⊘' : '=';
+      const res = t.result === 'void' ? 'anulada' : `${mark} ${smoney(t.pnl)}`;
+      return `<div ${row(t)}><span>${hhmm(t.t)}</span><span>${sideTxt(t.side, t.mode || 'binary')}</span><span>${pxOf(t, t.entry)} → ${pxOf(t, t.exit)}</span><span class="${cls}">${res}</span></div>`;
     }).join('');
     $('sim-history').innerHTML = closed ? `<div class="trades"><h4>Encerradas</h4>${closed}</div>` : '';
   }
+
+  // Casas decimais pelo ativo da operação (não pelo ativo aberto agora)
+  const decOf = t => { const a = t.symbol && Live.asset(t.symbol); return a ? a.dec : decFromPrice(t.entry); };
+  const pxOf = (t, v) => num(v, decOf(t));
+  const when = ms => new Date(ms).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const IV_TXT = { '1m': '1 min', '3m': '3 min', '5m': '5 min', '15m': '15 min', '30m': '30 min', '1h': '1 hora', '4h': '4 horas' };
+  const HOW_TXT = { live: 'preço ao vivo no vencimento', minute: 'abertura do minuto do vencimento, consultada na Binance' };
+  let detailId = null;
+
+  function showTradeDetails(id) {
+    const t = portfolio.open.concat(portfolio.closed).find(x => x.id === id);
+    if (!t) return;
+    detailId = id;
+    const fee = t.mode === 'fee', now = Date.now(), dir = t.side === 'up' ? 1 : -1;
+    const status = !t.result ? ['Em andamento', ''] : t.result === 'win' ? ['Lucro', 'pos'] : t.result === 'loss' ? ['Prejuízo', 'neg'] : t.result === 'void' ? ['Anulada', 'warn'] : ['Empate', ''];
+    const mins = t.horizon && t.intervalMs ? Math.round(t.horizon * t.intervalMs / 60000) : null;
+    const r = (k, v) => `<div class="row"><span>${k}</span><b>${v}</b></div>`;
+    let body = `<h3>Operação nº ${t.id} · ${sideTxt(t.side, t.mode || 'binary')} <span class="badge ${status[1]}">${status[0]}</span></h3>`;
+    body += r('Ativo', t.symbol ? `${Live.label(t.symbol)} (${t.symbol})` : '–');
+    body += r('Mercado', fee ? `${t.context && t.context.market === 'futures' ? 'Binance futuros' : 'Binance à vista'} · taxa ${num(t.feePct, 2)}% por lado` : `Opção binária · payout ${t.payoutPct}%`);
+    body += r('Tempo gráfico e saída', `${IV_TXT[t.interval] || '–'} · ${t.horizon} candle(s)${mins ? ` (${mins} min)` : ''}`);
+    body += r('Origem', t.source === 'alerta' ? 'alerta de sinal validado' : 'entrada manual');
+    body += r('Valor', money(t.stake));
+    body += r('Entrada', `${pxOf(t, t.entry)} · ${when(t.t)}`);
+    body += r('Vencimento', when(t.expiry));
+    if (!t.result) {
+      const live = state.live && state.live.symbol === t.symbol && state.candles.length ? state.candles[state.candles.length - 1].c : null;
+      body += r('Tempo restante', t.expiry > now ? mmss(t.expiry - now) : 'liquidando (consultando o preço do vencimento)');
+      if (live) {
+        const mv = dir * (live / t.entry - 1);
+        const est = fee ? t.stake * (mv - 2 * t.feePct / 100) : (mv > 0 ? t.stake * t.payoutPct / 100 : mv < 0 ? -t.stake : 0);
+        body += r('Preço agora', `${pxOf(t, live)} (${pctp(live / t.entry - 1)})`);
+        body += r('Resultado se fechasse agora', `<span class="${est >= 0 ? 'pos' : 'neg'}">${smoney(Math.round(est * 100) / 100)}</span>`);
+      }
+    } else if (t.result === 'void') {
+      body += r('Situação', t.voidReason || 'anulada');
+    } else {
+      const mv = t.exit / t.entry - 1;
+      body += r('Saída', `${pxOf(t, t.exit)}`);
+      body += r('Como o preço de saída foi obtido', HOW_TXT[t.how] || (t.approx ? 'aproximado (versão antiga)' : '–'));
+      body += r('Variação do preço', pctp(mv));
+      if (fee) body += r('Taxas pagas (entrada + saída)', money(Math.round(t.stake * 2 * t.feePct) / 100));
+      body += r('Resultado', `<span class="${t.pnl > 0 ? 'pos' : t.pnl < 0 ? 'neg' : ''}">${smoney(t.pnl)} (${pctp(t.pnl / t.stake)} do valor)</span>`);
+    }
+    if (t.context) {
+      const c = t.context;
+      body += `<h4>Na hora da entrada</h4>`;
+      if (c.p != null) body += r('Modelo', `▲ ${pct(c.p)} · ▼ ${pct(1 - c.p)}`);
+      body += `<p class="note">${c.decision === 'call' || c.decision === 'put' ? 'Havia sinal validado.' : 'Não havia sinal validado' + (c.text ? ': ' + c.text.replace(/^NÃO OPERAR · /, '') : '.')}</p>`;
+    }
+    $('trade-body').innerHTML = body;
+    const canChart = state.live && state.live.symbol === t.symbol && state.candles.length && t.t >= state.candles[0].t;
+    $('trade-chart').hidden = !canChart;
+    $('trade-dialog').showModal();
+  }
+
+  ['sim-open', 'sim-history'].forEach(id => {
+    const el = $(id);
+    el.addEventListener('click', e => { const r = e.target.closest('[data-id]'); if (r) showTradeDetails(+r.dataset.id); });
+    el.addEventListener('keydown', e => { const r = e.target.closest('[data-id]'); if (r && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showTradeDetails(+r.dataset.id); } });
+  });
+  $('trade-close').addEventListener('click', () => $('trade-dialog').close());
+  $('trade-chart').addEventListener('click', () => {
+    const t = portfolio.open.concat(portfolio.closed).find(x => x.id === detailId);
+    $('trade-dialog').close();
+    if (!t) return;
+    const c = state.candles; let i = c.length - 1;
+    while (i > 0 && c[i].t > t.t) i--;
+    chart.view.start = i - chart.view.count * 0.6;
+    chart.render();
+    $('chart').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
 
   $('sim-stake').value = prefs.stake;
   $('sim-auto').checked = !!prefs.auto;
@@ -697,5 +786,6 @@
   renderParams();
   renderSim();
   demo();
+  settleNow();
   window.__coldigo = { state, chart, load, portfolio: () => portfolio, enterTrade, prefs, alertCfg };
 })();

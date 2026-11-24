@@ -65,14 +65,27 @@ test('Portfolio: não liquida antes do vencimento e valida saldo e valor', () =>
   assert.throws(() => p.openTrade(Object.assign({ side: 'up' }, base, { stake: 0 })), /maior que zero/);
 });
 
-test('Portfolio: liquidação tardia usa o candle do vencimento e marca como aproximada', () => {
+test('Portfolio: nunca liquida com candles de outro ativo nem atrasado; settleAt usa o preço consultado', () => {
   const p = new S.Portfolio({ start: 1000 });
-  const tr = p.openTrade(Object.assign({ side: 'up' }, base));
-  // no vencimento o preço era 103; 10 minutos depois está em 90
-  const candles = bars(tr.expiry - 60000, [100, 103, 95, 92, 90]);
-  const [d] = p.settle(candles, tr.expiry + 10 * 60000);
-  assert.equal(d.result, 'win');
-  assert.equal(d.approx, true);
+  const eth = p.openTrade(Object.assign({ side: 'up' }, base, { symbol: 'ETHUSDT', price: 3554.92, stake: 20 }));
+  const demo = bars(eth.expiry - 60000, [113000, 113736.85]); // candles de outro ativo (o erro da captura)
+  assert.equal(p.settle(demo, eth.expiry + 1000, 'BTCUSDT').length, 0, 'ativo diferente: não liquida');
+  assert.equal(p.settle(demo, eth.expiry + 60000, 'ETHUSDT').length, 0, 'mais de 20 s atrasado: não liquida pelo ao vivo');
+  assert.deepEqual(p.needsLookup(eth.expiry + 60000, 'BTCUSDT').map(x => x.id), [eth.id]);
+  const d = p.settleAt(eth.id, 3560, 'minute');
+  assert.equal(d.result, 'win'); assert.equal(d.how, 'minute'); assert.equal(d.exit, 3560);
+  assert.equal(p.open.length, 0);
+  assert.equal(p.settleAt(eth.id, 3560), null, 'não liquida duas vezes');
+});
+
+test('Portfolio.repair: anula operação liquidada com preço de outro ativo e devolve o valor', () => {
+  // estado salvo pela versão com erro: ETH 3.554,92 -> 113.736,85, binária, +R$ 17
+  const p = new S.Portfolio({ start: 1000, balance: 1017, closed: [{ id: 1, side: 'up', entry: 3554.92, exit: 113736.85, stake: 20, payoutPct: 85, result: 'win', pnl: 17 }], seq: 1 });
+  assert.equal(p.repair(), 1);
+  assert.equal(p.balance, 1000);
+  assert.equal(p.closed[0].result, 'void');
+  assert.equal(S.summarize(p.closed).trades, 0, 'anuladas não entram nas estatísticas');
+  assert.equal(p.repair(), 0, 'idempotente');
 });
 
 test('Portfolio: serialização e reset', () => {
