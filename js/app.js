@@ -490,7 +490,7 @@
     const iv = intervalMin(), atual = params.horizon * iv, sel = $('sim-duracao');
     const opts = opcoesDuracao(iv);
     if (!opts.includes(atual)) { opts.push(atual); opts.sort((a, b) => a - b); } // tempo definido à mão em candles
-    sel.innerHTML = opts.map(d => `<option value="${d}"${d === atual ? ' selected' : ''}>${durTxt(d)} (${d / iv} candle${d / iv > 1 ? 's' : ''} de ${durTxt(iv)})</option>`).join('');
+    sel.innerHTML = opts.map(d => `<option value="${d}"${d === atual ? ' selected' : ''}>${durTxt(d)} · ${d / iv} candle${d / iv > 1 ? 's' : ''}</option>`).join('');
     $('sim-duracao-nota').textContent = `${avisoDuracao ? avisoDuracao + ' ' : ''}Cada operação termina ${durTxt(atual)} depois da entrada. O modelo e o alerta são validados para esse mesmo tempo.`;
   }
 
@@ -568,6 +568,13 @@
     $('sim-call').textContent = prefs.ponteEnviar && conta.conectada ? '▲ COMPRAR (conta demo)' : isFee() ? '▲ COMPRAR' : '▲ CALL (acima)';
     $('sim-put').textContent = isFee() ? '▼ VENDER' : '▼ PUT (abaixo)';
     $('sim-call').disabled = !ready; $('sim-put').disabled = !ready || params.market === 'spot';
+    const nota = $('sim-venda-nota');
+    nota.hidden = params.market !== 'spot';
+    if (params.market === 'spot') {
+      nota.innerHTML = prefs.ponteEnviar && conta.conectada
+        ? 'VENDER fica bloqueado: a conta demo é operada no mercado à vista, onde só dá para comprar. A venda do que você comprou é automática no fim do tempo da operação.'
+        : 'VENDER fica bloqueado no mercado à vista: lá só dá para comprar, e a venda do que você comprou é automática no fim do tempo da operação. Para apostar na queda, <button class="linklike" id="sim-ir-futuros" type="button">use Binance futuros</button> (ou opção binária em Parâmetros → Operação).';
+    }
     $('sim-hint').hidden = ready;
     renderTrades();
   }
@@ -670,6 +677,12 @@
   $('sim-auto').addEventListener('change', e => { prefs.auto = e.target.checked; persist(); if (prefs.auto) ensureAudio(); });
   $('sim-sound').addEventListener('change', e => { prefs.sound = e.target.checked; persist(); if (prefs.sound) ensureAudio(); });
   const manual = side => () => { ensureAudio(); try { showError(''); enterTrade(side, 'manual'); } catch (err) { showError(err.message); } };
+  $('sim-venda-nota').addEventListener('click', e => {
+    if (e.target.id !== 'sim-ir-futuros') return;
+    const sel = $('p-market');
+    sel.value = 'futures';
+    sel.dispatchEvent(new Event('change'));
+  });
   $('sim-call').addEventListener('click', manual('up'));
   $('sim-put').addEventListener('click', manual('down'));
   $('sim-reset').addEventListener('click', () => {

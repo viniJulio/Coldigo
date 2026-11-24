@@ -168,3 +168,4 @@ tr.gate td { font-weight: 600; background: color-mix(in srgb, var(--accent) 10%,
 .dur-form { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 10px; align-items: center; font-size: 13px; margin: 0 0 4px; }
 .dur-form select { width: 100%; min-width: 0; }
 #sim-duracao-nota { margin: 2px 0 10px !important; }
+.linklike { background: none; border: 0; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
