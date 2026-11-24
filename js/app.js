@@ -39,10 +39,11 @@
   let portfolio = new Sim.Portfolio(saved.portfolio);
   const repaired = portfolio.repair(); // anula operações liquidadas com preço de outro ativo (erro antigo)
   let tests = Array.isArray(saved.tests) ? saved.tests : [];
+  let teste = saved.teste || null; // plano do teste automático
   Object.assign(prefs, saved.prefs);
   Object.assign(alertCfg, saved.alertCfg);
   Object.assign(params, saved.params);
-  function persist() { store.set({ portfolio, prefs, alertCfg, tests, params: { horizon: params.horizon, payout: params.payout, history: params.history, trainN: params.trainN, market: params.market, feePct: params.feePct } }); }
+  function persist() { store.set({ portfolio, prefs, alertCfg, tests, teste, params: { horizon: params.horizon, payout: params.payout, history: params.history, trainN: params.trainN, market: params.market, feePct: params.feePct } }); }
 
   function showError(msg) {
     const el = $('error');
@@ -350,6 +351,7 @@
       ? Sim.evaluateAlertCosts({ p: state.pred.p, research: r.evc, market: r.market }, alertCfg)
       : Sim.evaluateAlert({ p: state.pred.p, research: r.ev }, alertCfg, params.payout);
     state.alert = res && { res, candleT: c[m].t };
+    if (notify) rodarTeste(c[m]);
     if (notify && res && res.fire) fireAlert(res, c[m]);
     renderDecision();
   }
@@ -358,7 +360,7 @@
     const label = state.live ? Live.label(state.live.symbol) + ' · ' + state.live.interval : state.source;
     const entry = { t: last.t + (state.live ? state.live.intervalMs : 0), side: res.side, label, auto: false };
     const abertas = prefs.ponteEnviar && conta.conectada ? conta.ops.filter(o => o.estado === 'aberta').length : portfolio.open.length;
-    if (prefs.auto && state.live && abertas === 0) {
+    if (prefs.auto && state.live && abertas === 0 && !(teste && !teste.encerrado)) {
       try { enterTrade(res.side, 'alerta'); entry.auto = true; } catch (e) { showError(e.message); }
     }
     state.alertLog.unshift(entry);
@@ -531,10 +533,11 @@
   // --- Simulador ---
   function simReady() { return !!state.live && !!state.analysis && state.candles.length > 0; }
 
-  function enterTrade(side, source) {
+  function enterTrade(side, source, opts) {
+    opts = opts || {};
     if (!simReady()) throw new Error('Ative o modo Ao vivo para operar no simulador.');
     if (params.market === 'spot' && side === 'down') throw new Error('No mercado à vista só é possível comprar.');
-    if (prefs.ponteEnviar && conta.conectada) { // ordem real na conta DEMO, executada pela ponte
+    if (prefs.ponteEnviar && conta.conectada && !opts.soSimulador) { // ordem real na conta DEMO, executada pela ponte
       if (params.market !== 'spot') throw new Error('A conta demo é operada no mercado à vista: escolha "Binance à vista" em Parâmetros → Operação.');
       if (side !== 'up') throw new Error('No mercado à vista só é possível comprar.');
       enviarParaDemo(source);
@@ -542,7 +545,7 @@
     }
     const last = state.candles[state.candles.length - 1];
     portfolio.openTrade({
-      side, price: last.c, t: Date.now(), stake: prefs.stake, payoutPct: params.payout, horizon: params.horizon,
+      side, price: last.c, t: opts.t || Date.now(), stake: prefs.stake, plano: opts.plano, payoutPct: params.payout, horizon: params.horizon,
       feePct: isFee() ? params.feePct : undefined, interval: state.live.interval,
       context: (() => { const d = decisionState(); return { p: state.pred ? state.pred.p : null, decision: d.kind, text: d.text, market: params.market }; })(),
       intervalMs: state.live.intervalMs, symbol: state.live.symbol, source
@@ -602,6 +605,7 @@
     $('sim-hint').hidden = ready;
     renderTrades();
     renderDesempenho();
+    renderTeste();
   }
 
   function renderTrades() {
@@ -902,6 +906,79 @@
     const f = e.dataTransfer.files[0];
     if (!f) return;
     try { load(Data.parseCSV(await f.text()), f.name); } catch (err) { showError(err.message); }
+  });
+
+  // --- Teste automático ---
+  const doTeste = () => (teste ? portfolio.open.concat(portfolio.closed).filter(t => t.plano === teste.id) : []);
+
+  function rodarTeste(candle) {
+    if (!teste || teste.encerrado) return;
+    const ops = doTeste();
+    const d = Sim.decidirTeste(teste, {
+      live: !!state.live && liveStatus === 'live', symbol: state.live && state.live.symbol, interval: state.live && state.live.interval,
+      horizon: params.horizon, market: params.market, p: state.pred ? state.pred.p : null,
+      abertas: ops.filter(t => !t.result).length, concluidas: ops.filter(t => t.result && t.result !== 'void').length
+    });
+    teste.avaliados++;
+    if (d.acao === 'encerrado' && d.motivo === 'meta atingida') { teste.encerrado = true; teste.fim = Date.now(); }
+    else if (d.acao === 'entrar') {
+      try { // entra no fechamento oficial do candle: o vencimento cai no fechamento de um candle futuro
+        enterTrade(d.side, 'teste', { soSimulador: true, plano: teste.id, t: candle.t + state.live.intervalMs });
+        teste.entradas++;
+      } catch (e) { d.motivo = e.message; }
+    } else if (d.acao === 'pular' && d.pDir != null) teste.abaixo++;
+    else if (d.acao === 'pular' && /em andamento/.test(d.motivo)) teste.ocupado++;
+    teste.ultimo = { t: Date.now(), acao: d.acao, motivo: d.motivo || '', pDir: d.pDir };
+    persist(); renderTeste();
+  }
+
+  function renderTeste() {
+    const st = $('teste-status');
+    $('teste-form').hidden = !!(teste && !teste.encerrado);
+    $('teste-iniciar').hidden = !!(teste && !teste.encerrado);
+    $('teste-encerrar').hidden = !(teste && !teste.encerrado);
+    if (!teste) { st.className = 'conta-status off'; st.textContent = 'Nenhum teste em andamento. Escolha o ativo, o tempo gráfico e o tempo da operação, ligue o Ao vivo e inicie.'; $('teste-resultado').innerHTML = ''; return; }
+    const ops = doTeste(), concl = ops.filter(t => t.result && t.result !== 'void');
+    const cfg = `${Live.label(teste.symbol)} · candles de ${durTxt(ivMinOf(teste.interval))} · saída em ${durTxt(teste.horizon * ivMinOf(teste.interval))} · ${MARKET_TXT[teste.market]} · entra com ${pct(teste.limiar)} ou mais`;
+    const atual = { symbol: state.live && state.live.symbol, interval: state.live && state.live.interval, horizon: params.horizon, market: params.market };
+    const diferente = state.live && ['symbol', 'interval', 'horizon', 'market'].some(k => teste[k] !== atual[k]);
+    if (teste.encerrado) { st.className = 'conta-status on'; st.textContent = `Teste encerrado: ${concl.length} operações. ${cfg}.`; }
+    else if (!state.live || liveStatus !== 'live') { st.className = 'conta-status warn'; st.textContent = `Pausado: ligue o Ao vivo. ${cfg}.`; }
+    else if (diferente) { st.className = 'conta-status warn'; st.textContent = `Pausado: a configuração aberta é diferente da do teste. Volte para ${cfg}, ou encerre o teste.`; }
+    else { st.className = 'conta-status on'; st.textContent = `Em andamento: ${concl.length} de ${teste.meta} operações. ${cfg}.`; }
+    const r = Sim.report(ops), tot = r.total, bin = teste.market === 'binary';
+    const be = bin ? 1 / (1 + teste.payout / 100) : null;
+    const faixa = g => (g.n ? `${pct(g.low)} a ${pct(g.high)}` : '–');
+    let veredito = '';
+    if (tot.n >= 30 && bin) veredito = tot.low > be ? `Acerto acima do empate (${pct(be)}) com 95% de confiança.` : tot.high < be ? `Acerto abaixo do empate (${pct(be)}) com 95% de confiança: do jeito que está, dá prejuízo.` : `Ainda inconclusivo: o intervalo inclui o empate (${pct(be)}).`;
+    else if (tot.n < 30) veredito = `Ainda é cedo para concluir (${tot.n} de pelo menos 30${teste.meta > 30 ? `, idealmente ${teste.meta}` : ''}).`;
+    const calib = r.faixas.filter(f => f.n).map(f => `<tr><td>${f.label}</td><td>${f.n}</td><td>${pct(f.pMedia)}</td><td>${pct(f.rate)}</td><td>${faixa(f)}</td></tr>`).join('');
+    $('teste-resultado').innerHTML = `<div class="trades">
+      <div class="row"><span>Candles avaliados</span><b>${teste.avaliados}</b></div>
+      <div class="row"><span>Entradas (modelo passou do limite)</span><b>${teste.entradas}</b></div>
+      <div class="row"><span>Sem entrada (modelo abaixo do limite)</span><b>${teste.abaixo}</b></div>
+      <div class="row"><span>${bin ? 'Acerto' : 'Com lucro'} (intervalo de 95%)</span><b>${pct(tot.rate)} (${faixa(tot)})</b></div>
+      ${bin ? `<div class="row"><span>Ponto de empate (payout ${teste.payout}%)</span><b>${pct(be)}</b></div>` : ''}
+      <div class="row"><span>Resultado</span><b class="${tot.pnl >= 0 ? 'pos' : 'neg'}">${smoney(tot.pnl)}</b></div>
+      ${veredito ? `<p class="note" style="margin:6px 0">${veredito}</p>` : ''}
+      ${calib ? `<h4>Calibração: o modelo dava…</h4><table><thead><tr><th>Faixa</th><th>n</th><th>Média</th><th>Real</th><th>Intervalo</th></tr></thead><tbody>${calib}</tbody></table>` : ''}
+      ${teste.ultimo ? `<p class="note" style="margin:6px 0 0">Último candle (${hhmm(teste.ultimo.t)}): ${teste.ultimo.acao === 'entrar' ? `entrou (${pct(teste.ultimo.pDir)} a favor)` : (teste.ultimo.motivo || teste.ultimo.acao) + (teste.ultimo.pDir != null ? ` (${pct(teste.ultimo.pDir)})` : '')}.</p>` : ''}
+    </div>`;
+  }
+
+  $('teste-iniciar').addEventListener('click', () => {
+    if (!state.live || liveStatus !== 'live') { showError('Ligue o Ao vivo e escolha a configuração antes de iniciar o teste.'); return; }
+    const limiar = Math.max(50, Math.min(80, parseFloat($('teste-limiar').value) || 53)) / 100;
+    const meta = Math.max(30, Math.min(2000, parseInt($('teste-meta').value, 10) || 200));
+    teste = { id: 't' + Date.now(), symbol: state.live.symbol, interval: state.live.interval, horizon: params.horizon, market: params.market,
+      payout: params.payout, feePct: params.feePct, limiar, meta, inicio: Date.now(), avaliados: 0, entradas: 0, abaixo: 0, ocupado: 0, encerrado: false };
+    showError(''); ensureAudio(); persist(); renderTeste();
+  });
+  $('teste-encerrar').addEventListener('click', e => {
+    const b = e.target;
+    if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = 'Toque de novo para encerrar'; setTimeout(() => { b.dataset.armed = '0'; b.textContent = 'Encerrar teste'; }, 4000); return; }
+    teste.encerrado = true; teste.fim = Date.now(); b.dataset.armed = '0'; b.textContent = 'Encerrar teste';
+    persist(); renderTeste();
   });
 
   // --- Desempenho das entradas (assertividade e calibração) ---

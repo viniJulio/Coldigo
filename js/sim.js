@@ -52,6 +52,25 @@
     return trades.map(t => ({ ...t, result: t.hit ? 'win' : 'loss', pnl: t.hit ? round2(stake * payoutPct / 100) : -stake }));
   }
 
+  // ---------- Teste automático (plano fixo) ----------
+  /** Decide o que o teste automático faz no fechamento de um candle.
+   *  plano: { symbol, interval, horizon, market, limiar, meta, encerrado }
+   *  agora: { live, symbol, interval, horizon, market, p, abertas, concluidas }
+   *  Retorna { acao: 'entrar', side, pDir } ou { acao: 'pular' | 'pausado' | 'encerrado', motivo }. */
+  function decidirTeste(plano, agora) {
+    if (!plano || plano.encerrado) return { acao: 'encerrado', motivo: 'sem teste em andamento' };
+    if (agora.concluidas >= plano.meta) return { acao: 'encerrado', motivo: 'meta atingida' };
+    if (!agora.live) return { acao: 'pausado', motivo: 'o modo Ao vivo está desligado' };
+    const dif = ['symbol', 'interval', 'horizon', 'market'].filter(k => plano[k] !== agora[k]);
+    if (dif.length) return { acao: 'pausado', motivo: 'a configuração atual é diferente da do teste', dif };
+    if (agora.p == null) return { acao: 'pular', motivo: 'modelo ainda sem previsão' };
+    if (agora.abertas > 0) return { acao: 'pular', motivo: 'já há uma operação do teste em andamento' };
+    const side = agora.p >= 0.5 ? 'up' : 'down', pDir = side === 'up' ? agora.p : 1 - agora.p;
+    if (pDir < plano.limiar) return { acao: 'pular', motivo: 'modelo abaixo do limite', pDir };
+    if (plano.market === 'spot' && side === 'down') return { acao: 'pular', motivo: 'modelo aponta queda, e à vista só se compra', pDir };
+    return { acao: 'entrar', side, pDir };
+  }
+
   // ---------- Desempenho das entradas do usuário ----------
   /** Intervalo de Wilson (95%) para uma proporção. */
   function wilson(hits, n, z) {
@@ -159,7 +178,7 @@
         id: ++this.seq, side: o.side, entry: o.price, t: o.t, stake: o.stake, payoutPct: o.payoutPct,
         mode: o.feePct != null ? 'fee' : 'binary', feePct: o.feePct,
         horizon: o.horizon, intervalMs: o.intervalMs, expiry: o.t + o.horizon * o.intervalMs,
-        symbol: o.symbol || '', source: o.source || 'manual', interval: o.interval, context: o.context || null
+        symbol: o.symbol || '', source: o.source || 'manual', interval: o.interval, context: o.context || null, plano: o.plano || null
       };
       this.open.push(trade);
       return trade;
@@ -231,7 +250,7 @@
     toJSON() { return { start: this.start, balance: this.balance, open: this.open, closed: this.closed, seq: this.seq }; }
   }
 
-  const api = { evaluateAlert, evaluateAlertCosts, pnlTrades, summarize, report, toCSV, wilson, probAFavor, Portfolio, breakeven, candleAt, DEFAULT_CFG };
+  const api = { evaluateAlert, evaluateAlertCosts, pnlTrades, summarize, report, decidirTeste, toCSV, wilson, probAFavor, Portfolio, breakeven, candleAt, DEFAULT_CFG };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Coldigo = Object.assign(root.Coldigo || {}, { Sim: api });
 })(typeof self !== 'undefined' ? self : this);

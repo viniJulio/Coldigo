@@ -166,3 +166,28 @@ test('toCSV: cabeçalho, separador ";" e decimal com vírgula', () => {
   assert.ok(h.startsWith('id;entrada_utc;'));
   assert.equal(l, '1;2026-11-24 13:02:00;2026-11-24 13:07:00;EUR/USD;binaria;alta;10,00;1,095710;1,093040;loss;-10,00;0,6123;0,6123;sim;manual;5m;1;85;;live');
 });
+
+test('teste automático: entra só no plano, a favor do modelo, acima do limite e uma por vez', () => {
+  const plano = { symbol: 'EUR/USD', interval: '1m', horizon: 5, market: 'binary', limiar: 0.53, meta: 200 };
+  const agora = o => Object.assign({ live: true, symbol: 'EUR/USD', interval: '1m', horizon: 5, market: 'binary', p: 0.56, abertas: 0, concluidas: 10 }, o);
+  assert.deepEqual(S.decidirTeste(plano, agora()), { acao: 'entrar', side: 'up', pDir: 0.56 });
+  const put = S.decidirTeste(plano, agora({ p: 0.44 }));
+  assert.equal(put.acao, 'entrar'); assert.equal(put.side, 'down'); assert.ok(Math.abs(put.pDir - 0.56) < 1e-12);
+  assert.equal(S.decidirTeste(plano, agora({ p: 0.52 })).acao, 'pular');            // abaixo do limite
+  assert.equal(S.decidirTeste(plano, agora({ p: 0.53 })).acao, 'entrar');           // no limite entra
+  assert.equal(S.decidirTeste(plano, agora({ abertas: 1 })).acao, 'pular');         // uma por vez
+  assert.equal(S.decidirTeste(plano, agora({ p: null })).acao, 'pular');            // modelo sem previsão
+  assert.equal(S.decidirTeste(plano, agora({ live: false })).acao, 'pausado');
+  const outro = S.decidirTeste(plano, agora({ symbol: 'BTCUSDT', horizon: 3 }));
+  assert.equal(outro.acao, 'pausado'); assert.deepEqual(outro.dif, ['symbol', 'horizon']); // não mistura configurações
+  assert.equal(S.decidirTeste(plano, agora({ concluidas: 200 })).acao, 'encerrado'); // meta atingida
+  assert.equal(S.decidirTeste(Object.assign({}, plano, { encerrado: true }), agora()).acao, 'encerrado');
+  const spot = Object.assign({}, plano, { market: 'spot' });
+  assert.equal(S.decidirTeste(spot, agora({ market: 'spot', p: 0.40 })).acao, 'pular'); // à vista não vende
+});
+
+test('Portfolio guarda o plano do teste na operação', () => {
+  const p = new S.Portfolio({ start: 1000 });
+  const tr = p.openTrade(Object.assign({ side: 'up', plano: 't1' }, base));
+  assert.equal(tr.plano, 't1');
+});
