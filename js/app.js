@@ -1,11 +1,12 @@
 (function () {
   'use strict';
-  const { Forecast, Data, Chart, Live, Sim, Model, Indicators } = window.Coldigo;
+  const { Forecast, Data, Chart, Live, Sim, Model, Indicators, Forex } = window.Coldigo;
+  Forex.PAIRS.forEach(a => { if (!Live.asset(a.symbol)) Live.ASSETS.push(a); }); // pares de câmbio real no mesmo catálogo
   const $ = id => document.getElementById(id);
 
   const params = { horizon: 12, simulations: 2000, window: 300, driftFactor: 0.1, tpAtr: 1.5, slAtr: 1, payout: 85, history: 6000, trainN: 2500, market: 'spot', feePct: 0.1 };
   const alertCfg = Object.assign({}, Sim.DEFAULT_CFG);
-  const prefs = { stake: 10, auto: false, sound: true, ponteUrl: 'http://127.0.0.1:8787', ponteCodigo: '', ponteValor: 20, ponteEnviar: false };
+  const prefs = { stake: 10, auto: false, sound: true, ponteUrl: 'http://127.0.0.1:8787', ponteCodigo: '', ponteValor: 20, ponteEnviar: false, tdKey: '' };
   const state = { candles: [], analysis: null, source: '', live: null, liveLen: 0, alert: null, alertLog: [], bannerDismissed: null, research: null, pred: null, closedSince: 0, dec: 2 };
   const chart = new Chart($('chart'), $('tooltip'));
 
@@ -192,6 +193,15 @@
       </div>
 
       <div class="card">
+        <h3>Dados de câmbio real (Twelve Data)</h3>
+        <div class="ponte-form">
+          <label for="p-tdkey">Sua chave</label><input id="p-tdkey" type="password" autocomplete="off" spellcheck="false" placeholder="chave de API do Twelve Data" value="${prefs.tdKey ? '••••••••' : ''}">
+        </div>
+        <div class="row-btns"><button class="btn small primary" id="p-tdsave" type="button">Salvar chave</button><button class="btn small" id="p-tdclear" type="button">Apagar</button></div>
+        <p class="note" id="p-tdnote" style="margin-top:8px"></p>
+      </div>
+
+      <div class="card">
         <h3>Modelo e alerta</h3>
         <div class="params">
           ${row('p-train', 'Janela de treino (candles)', 'min="800" max="8000" step="100"', params.trainN)}
@@ -229,9 +239,23 @@
     };
     bind('p-horizon', v => { params.horizon = Math.max(1, Math.min(60, Math.round(v))); }, () => { reanalyze(true, true)(); renderDuracoes(); });
     bind('p-fee', v => { params.feePct = Math.max(0, Math.min(1, v)); }, reanalyze(false, true));
+    $('p-tdsave').addEventListener('click', () => {
+      const v = $('p-tdkey').value.trim();
+      if (v && !/^•+$/.test(v)) { prefs.tdKey = v; persist(); $('p-tdkey').value = '••••••••'; }
+      renderTdNote(); if (state.live && Forex.isForex(state.live.symbol)) startLive();
+    });
+    $('p-tdclear').addEventListener('click', () => { prefs.tdKey = ''; persist(); $('p-tdkey').value = ''; renderTdNote(); });
+    renderTdNote();
     $('p-market').addEventListener('change', e => {
       params.market = e.target.value;
       if (params.market !== 'binary') { params.feePct = params.market === 'spot' ? 0.1 : 0.05; $('p-fee').value = params.feePct; }
+      const antes = symSel.value;
+      fillAssets();
+      // binária: abre no câmbio real; Binance: sai do câmbio real (a Binance não negocia esses pares)
+      if (params.market === 'binary' && !Forex.isForex(symSel.value)) symSel.value = 'EUR/USD';
+      if (params.market !== 'binary' && Forex.isForex(symSel.value)) symSel.value = 'BTCUSDT';
+      ajustarTempos();
+      if (symSel.value !== antes && state.live) startLive();
       persist(); renderSim();
       try { showError(''); reanalyze(false, true)(); } catch (err) { showError(err.message); }
     });
@@ -536,7 +560,7 @@
     for (const tr of portfolio.needsLookup(now, sym)) {
       if (!tr.symbol || now - (lookups.get(tr.id) || 0) < 60000) continue;
       lookups.set(tr.id, now);
-      Live.priceAt(tr.symbol, tr.expiry).then(price => {
+      (Forex.isForex(tr.symbol) ? Forex.priceAt(tr.symbol, tr.expiry, prefs.tdKey) : Live.priceAt(tr.symbol, tr.expiry)).then(price => {
         if (price != null && portfolio.settleAt(tr.id, price, 'minute')) { lookups.delete(tr.id); persist(); syncMarkers(); renderSim(); }
       }).catch(() => { /* sem rede: tenta de novo em 1 minuto */ });
     }
@@ -699,19 +723,32 @@
   // --- Ao vivo (Binance) ---
   let pendingTimer = null, lastRun = 0, countdownTimer = null, liveStatus = 'idle';
   const symSel = $('live-symbol'), intSel = $('live-interval'), liveBtn = $('btn-live'), pill = $('live-status');
+  let ivAnterior = intSel.value; // tempo gráfico anterior (para manter o tempo da operação ao trocar)
   const unavailable = new Set();
+  // Opção binária: câmbio real (Twelve Data) e cripto. Binance à vista/futuros: o que a Binance negocia.
+  const GRUPOS = {
+    binary: [['Câmbio real', 'Câmbio real (Twelve Data)'], ['Cripto', 'Cripto (Binance)']],
+    fee: [['Cripto', 'Cripto'], ['Câmbio', 'Câmbio (referência via Binance)'], ['Ouro', 'Ouro (referência via Binance)']]
+  };
   function fillAssets() {
     const keep = symSel.value;
     symSel.innerHTML = '';
-    for (const group of ['Cripto', 'Câmbio', 'Ouro']) {
+    for (const [group, rotulo] of GRUPOS[params.market === 'binary' ? 'binary' : 'fee']) {
       const items = Live.ASSETS.filter(a => a.group === group && !unavailable.has(a.symbol));
       if (!items.length) continue;
       const og = document.createElement('optgroup');
-      og.label = group === 'Câmbio' ? 'Câmbio (referência via Binance)' : group === 'Ouro' ? 'Ouro (referência via Binance)' : group;
+      og.label = rotulo;
       items.forEach(a => og.appendChild(new Option(a.label, a.symbol)));
       symSel.appendChild(og);
     }
     if (keep && Array.from(symSel.options).some(o => o.value === keep)) symSel.value = keep;
+    ajustarTempos();
+  }
+  // O Twelve Data não tem candles de 3 min
+  function ajustarTempos() {
+    const fx = Forex.isForex(symSel.value);
+    Array.from(intSel.options).forEach(o => { o.disabled = fx && !Forex.TD_INTERVAL[o.value]; });
+    if (fx && !Forex.TD_INTERVAL[intSel.value]) { intSel.value = '5m'; ivAnterior = '5m'; }
   }
   fillAssets();
   // Ao abrir, confere quais pares de câmbio/ouro a Binance ainda lista e esconde os inativos
@@ -723,11 +760,19 @@
   }
   function updateAssetNote() {
     const a = state.live && Live.asset(state.live.symbol), el = $('asset-note');
+    if (a && a.provider === 'twelvedata') {
+      el.hidden = false;
+      el.textContent = Forex.marketClosed(Date.now())
+        ? 'Fim de semana: o câmbio oficial está fechado. Os preços do Twelve Data neste período não vêm do mercado interbancário, e a sua corretora usa ativos OTC próprios, com preços dela. Resultados daqui não valem para o OTC.'
+        : `Preço real do mercado de câmbio (Twelve Data), atualizado a cada candle fechado. A sua corretora pode mostrar valores um pouco diferentes. Consultas hoje: ${Forex.usage.get()} de ${Forex.DAILY_LIMIT} do plano grátis.`;
+      return;
+    }
     el.hidden = !(a && a.proxy);
     if (a && a.proxy) el.textContent = `Preço de referência: ${a.symbol} na Binance. Acompanha o ${a.label}, mas não é o mesmo feed da sua corretora e a Binance opera 24h, inclusive no fim de semana, quando o mercado de câmbio real está fechado. Os preços podem divergir um pouco.`;
   }
 
   function setStatus(kind, msg) {
+    if (kind === 'live') updateAssetNote();
     liveStatus = kind;
     pill.hidden = kind === 'idle';
     pill.className = 'pill ' + (kind === 'live' ? 'live' : kind === 'error' ? 'error' : 'warn');
@@ -766,7 +811,8 @@
 
   function onLiveData(candles, info) {
     state.candles = candles;
-    state.source = `Binance · ${Live.label(symSel.value)}${(Live.asset(symSel.value) || {}).proxy ? ' (' + symSel.value + ')' : ''} · ${intSel.value} (ao vivo)`;
+    state.source = Forex.isForex(symSel.value) ? `Twelve Data · ${Live.label(symSel.value)} · ${intSel.value} (ao vivo, 1 consulta por candle)`
+      : `Binance · ${Live.label(symSel.value)}${(Live.asset(symSel.value) || {}).proxy ? ' (' + symSel.value + ')' : ''} · ${intSel.value} (ao vivo)`;
     settleNow();
     if (info.reset) {
       state.liveLen = candles.length; showError('');
@@ -785,7 +831,9 @@
     stopLive();
     ensureAudio(); lockScreen();
     state.alertLog = []; state.alert = null; state.bannerDismissed = null; state.research = null; state.pred = null;
-    state.live = new Live.LiveFeed({ symbol: symSel.value, interval: intSel.value, history: params.history, onData: onLiveData, onStatus: setStatus });
+    state.live = Forex.isForex(symSel.value)
+      ? new Forex.ForexFeed({ symbol: symSel.value, interval: intSel.value, apiKey: prefs.tdKey, history: Math.min(5000, params.history), onData: onLiveData, onStatus: setStatus })
+      : new Live.LiveFeed({ symbol: symSel.value, interval: intSel.value, history: params.history, onData: onLiveData, onStatus: setStatus });
     liveBtn.classList.add('on'); liveBtn.setAttribute('aria-pressed', 'true');
     updateAssetNote();
     countdownTimer = setInterval(tick, 1000);
@@ -803,8 +851,7 @@
   }
 
   liveBtn.addEventListener('click', () => (state.live ? stopLive() : startLive()));
-  symSel.addEventListener('change', () => { if (state.live) startLive(); });
-  let ivAnterior = intSel.value;
+  symSel.addEventListener('change', () => { ajustarTempos(); if (state.live) startLive(); });
   intSel.addEventListener('change', () => {
     if (state.live) {
       const dur = params.horizon * ivMinOf(ivAnterior), iv = ivMinOf(intSel.value);
@@ -1002,6 +1049,12 @@
   $('ponte-desconectar').addEventListener('click', desconectarPonte);
   $('ponte-valor').addEventListener('change', e => { const v = parseFloat(e.target.value); if (v > 0) { prefs.ponteValor = v; persist(); } else e.target.value = prefs.ponteValor; });
   $('ponte-enviar').addEventListener('change', e => { prefs.ponteEnviar = e.target.checked; persist(); renderSim(); });
+
+  function renderTdNote() {
+    const el = $('p-tdnote'); if (!el) return;
+    el.textContent = (prefs.tdKey ? 'Chave salva neste navegador. ' : 'Sem chave: os pares de câmbio real não carregam. ') +
+      `Consultas hoje: ${Forex.usage.get()} de ${Forex.DAILY_LIMIT} do plano grátis (o app faz 1 para o histórico e 1 por candle fechado; em 1 min dá cerca de 13 horas por dia num par). A chave fica só neste navegador.`;
+  }
 
   // --- Versão e aviso de atualização ---
   $('app-version').textContent = window.COLDIGO_VERSION ? 'versão ' + window.COLDIGO_VERSION : '';
