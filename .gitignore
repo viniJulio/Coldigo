@@ -1,2 +1,6 @@
 node_modules/
 .DS_Store
+# ponte local: chave da conta e operações ficam só no seu computador
+ponte/config.json
+ponte/operacoes.json
+ponte/*.pem

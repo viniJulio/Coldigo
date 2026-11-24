@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Coldigo — Análise gráfica day trade</title>
-  <link rel="stylesheet" href="css/style.css?v=2026-11-24.2">
+  <link rel="stylesheet" href="css/style.css?v=2026-11-24.3">
 </head>
 <body>
   <header class="topbar">
@@ -71,6 +71,23 @@
         <button class="btn small" id="sim-reset">Zerar simulador</button>
       </div>
 
+      <div class="card" id="conta-card">
+        <h3>Conta demo da Binance</h3>
+        <div id="conta-status" class="conta-status off">Desconectada</div>
+        <div class="ponte-form">
+          <label for="ponte-url">Endereço da ponte</label><input id="ponte-url" type="text" inputmode="url" spellcheck="false" value="http://127.0.0.1:8787">
+          <label for="ponte-codigo">Código de acesso</label><input id="ponte-codigo" type="password" autocomplete="off" spellcheck="false" placeholder="mostrado na janela da ponte">
+        </div>
+        <div class="row-btns"><button class="btn small primary" id="ponte-conectar" type="button">Conectar</button><button class="btn small" id="ponte-desconectar" type="button" hidden>Desconectar</button></div>
+        <div id="conta-saldo"></div>
+        <div class="sim-form" id="ponte-opcoes" hidden>
+          <label for="ponte-valor">Valor por ordem (USDT)</label><input id="ponte-valor" type="number" min="5" step="1" value="20">
+        </div>
+        <label class="chk" id="ponte-enviar-wrap" hidden><input type="checkbox" id="ponte-enviar"> Enviar minhas entradas (COMPRAR e alertas) para a conta demo</label>
+        <div id="conta-ops"></div>
+        <p class="note">A ponte roda no seu computador e guarda a chave da conta demo; este app nunca vê a chave. Como instalar: README, seção "Conta demo da Binance".</p>
+      </div>
+
       <div id="sec-main"></div>
       <div id="sec-params"></div>
       <div class="disclaimer" id="disclaimer"></div>
@@ -94,18 +111,20 @@
     <div id="trade-body" class="trade-body"></div>
     <div class="dlg-actions">
       <button class="btn" id="trade-chart" type="button">Ver no gráfico</button>
+      <button class="btn" id="trade-sell-now" type="button" hidden>Vender agora</button>
       <button class="btn primary" id="trade-close" type="button">Fechar</button>
     </div>
   </dialog>
 
-  <script>window.COLDIGO_VERSION = '2026-11-24.2';</script>
-  <script src="js/indicators.js?v=2026-11-24.2"></script>
-  <script src="js/forecast.js?v=2026-11-24.2"></script>
-  <script src="js/data.js?v=2026-11-24.2"></script>
-  <script src="js/live.js?v=2026-11-24.2"></script>
-  <script src="js/model.js?v=2026-11-24.2"></script>
-  <script src="js/sim.js?v=2026-11-24.2"></script>
-  <script src="js/chart.js?v=2026-11-24.2"></script>
-  <script src="js/app.js?v=2026-11-24.2"></script>
+  <script>window.COLDIGO_VERSION = '2026-11-24.3';</script>
+  <script src="js/indicators.js?v=2026-11-24.3"></script>
+  <script src="js/forecast.js?v=2026-11-24.3"></script>
+  <script src="js/data.js?v=2026-11-24.3"></script>
+  <script src="js/live.js?v=2026-11-24.3"></script>
+  <script src="js/model.js?v=2026-11-24.3"></script>
+  <script src="js/sim.js?v=2026-11-24.3"></script>
+  <script src="js/ponte.js?v=2026-11-24.3"></script>
+  <script src="js/chart.js?v=2026-11-24.3"></script>
+  <script src="js/app.js?v=2026-11-24.3"></script>
 </body>
 </html>

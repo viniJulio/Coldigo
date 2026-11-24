@@ -67,6 +67,30 @@ Carteira fictícia (R$ 1.000 iniciais) de opções binárias, no modo ao vivo: *
 
 Para o câmbio real (feed da corretora ou do MetaTrader), exporte o histórico em CSV e carregue pelo botão **Carregar CSV**: o modelo valida do mesmo jeito, só que sem o fluxo de ordens, que o CSV não traz.
 
+### Conta demo da Binance (ponte local, Windows)
+
+O app pode enviar as suas entradas (o botão COMPRAR e os alertas) para a **conta demo** da Binance e mostrar saldo, ordens executadas, taxas e o resultado real. Quem fala com a Binance é a **ponte**, um pequeno programa que roda no seu computador:
+
+- guarda a chave da conta demo em `ponte/config.json`, que nunca vai para o Git nem para o app;
+- só escuta no próprio PC (`127.0.0.1`), só atende quem tem o **código de acesso** e vem do seu app, e só fala com a conta **demo**;
+- compra a mercado e **vende sozinha no vencimento**, mesmo com o navegador fechado (o PC e a ponte precisam estar ligados; se ela estiver desligada no vencimento, vende assim que religar);
+- tem limite de valor por ordem (padrão 100 USDT, ajustável em `ponte/config.json`).
+
+**Instalação (uma vez):**
+
+1. Instale o **Node.js LTS** em [nodejs.org](https://nodejs.org) (avançar, avançar, concluir).
+2. Baixe o projeto: no GitHub, **Code → Download ZIP**, e extraia (por exemplo em `Documentos\Coldigo`).
+3. Na Binance, entre na **Demo Trading** e crie uma **chave de API** do tipo gerado pelo sistema (HMAC), com permissão de leitura e de negociação à vista. Nunca habilite saques. Copie a *API Key* e a *Secret Key*.
+4. Dê dois cliques em `ponte\iniciar.bat`. Na primeira vez ele cria `ponte\config.json` e avisa que falta a chave. Feche a janela, abra `ponte\config.json` no Bloco de Notas e cole as chaves entre as aspas de `"apiKey"` e `"secretKey"`. Salve.
+
+**Uso:**
+
+1. Dois cliques em `ponte\iniciar.bat` e deixe a janela aberta. Ela mostra o **código de acesso**.
+2. No navegador **do mesmo PC**, abra o app, vá ao cartão **Conta demo da Binance**, confira o endereço `http://127.0.0.1:8787`, cole o código e toque em **Conectar**. Se o navegador perguntar se o site pode acessar a rede local ou outros apps do dispositivo, permita.
+3. Escolha **Binance à vista** em Parâmetros, ligue o **Ao vivo**, marque **Enviar minhas entradas para a conta demo** e defina o valor por ordem em USDT. A partir daí, COMPRAR e os alertas (com entrada automática) viram ordens na conta demo. Toque numa operação para ver compra, venda, taxas e resultado; "Vender agora" encerra antes do vencimento.
+
+Limitações: só mercado à vista (compra e depois vende); a ponte só é alcançável pelo navegador do próprio PC; a Binance cobra a taxa da compra na moeda comprada e só vende em passos mínimos (no BTC, 0,00001), então quase toda operação deixa uma pequena **sobra** na conta, que o resultado conta pelo valor de mercado (em ordens pequenas ela pesa: numa ordem de 20 USDT pode chegar a ~3%). Segundo a própria Binance, os preços e o livro de ofertas da demo são parecidos com os reais, não idênticos.
+
 ### Versões e atualização
 
 O topo do app mostra a versão aberta. A cada publicação, rode `npm run versao`: ele grava uma versão nova em `version.json` e nos endereços dos arquivos do `index.html` (`?v=`), para o cache do navegador (10 minutos no GitHub Pages) não segurar a versão antiga. O app aberto confere o `version.json` ao voltar para a aba e a cada 5 minutos, e mostra **"Há uma versão nova do app · Atualizar agora"** quando ela existe.
@@ -84,7 +108,7 @@ CSV com data/hora, abertura, máxima, mínima, fechamento e volume. Aceita `,` `
 | **Alvo × stop** | Alvo e stop em múltiplos do ATR(14); mede quantas trajetórias tocam o alvo, o stop ou nenhum dentro do horizonte (empate no mesmo candle conta como stop). |
 | **Backtest walk-forward** | Para cada candle do histórico compara o score com o retorno `horizonte` candles depois, sem atravessar pregões. Mostra taxa de acerto e retorno médio por faixa de score. |
 
-Indicadores são causais (nenhum usa candles futuros). Os arquivos estão em `js/`: `indicators.js`, `forecast.js`, `data.js`, `live.js`, `model.js`, `sim.js`, `chart.js`, `app.js`.
+Indicadores são causais (nenhum usa candles futuros). Os arquivos estão em `js/`: `indicators.js`, `forecast.js`, `data.js`, `live.js`, `model.js`, `sim.js`, `ponte.js`, `chart.js`, `app.js`; a ponte local fica em `ponte/`.
 
 ## Limites que você deve conhecer
 
