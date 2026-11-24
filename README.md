@@ -67,6 +67,10 @@ Carteira fictícia (R$ 1.000 iniciais) de opções binárias, no modo ao vivo: *
 
 Para o câmbio real (feed da corretora ou do MetaTrader), exporte o histórico em CSV e carregue pelo botão **Carregar CSV**: o modelo valida do mesmo jeito, só que sem o fluxo de ordens, que o CSV não traz.
 
+### Versões e atualização
+
+O topo do app mostra a versão aberta. A cada publicação, rode `npm run versao`: ele grava uma versão nova em `version.json` e nos endereços dos arquivos do `index.html` (`?v=`), para o cache do navegador (10 minutos no GitHub Pages) não segurar a versão antiga. O app aberto confere o `version.json` ao voltar para a aba e a cada 5 minutos, e mostra **"Há uma versão nova do app · Atualizar agora"** quando ela existe.
+
 ### Formato dos dados
 
 CSV com data/hora, abertura, máxima, mínima, fechamento e volume. Aceita `,` `;` ou tab, cabeçalho em português ou inglês, `dd/mm/aaaa` ou ISO, decimal com vírgula, epoch, e exportações do MetaTrader (`<DATE> <TIME>` separados). Sem cabeçalho: 6 colunas = `datetime,o,h,l,c,v`; 7 colunas = `data,hora,o,h,l,c,v`.

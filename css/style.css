@@ -151,3 +151,6 @@ tr.gate td { font-weight: 600; background: color-mix(in srgb, var(--accent) 10%,
 .badge { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
 .badge.pos { color: var(--up); border-color: var(--up); } .badge.neg { color: var(--down); border-color: var(--down); } .badge.warn { color: var(--warn); border-color: var(--warn); }
 .warn-note { color: var(--warn); }
+
+.update-banner { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; padding: 8px max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px)); background: color-mix(in srgb, var(--accent) 16%, var(--panel)); border-bottom: 1px solid var(--accent); font-size: 14px; }
+.update-banner[hidden] { display: none; }
