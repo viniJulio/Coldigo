@@ -128,3 +128,41 @@ test('evaluateAlertCosts: exige amostra, líquido e excesso positivos e probabil
   const sp = S.evaluateAlertCosts({ p: 0.37, research: research(), market: 'spot' }, {});
   assert.equal(sp.side, 'up'); assert.equal(sp.fire, false);
 });
+
+test('report: acerto com intervalo de 95%, sinal validado, a favor/contra o modelo e calibração', () => {
+  const T = (id, side, p, result, decision, symbol) => ({ id, side, result, pnl: result === 'win' ? 8.5 : result === 'loss' ? -10 : 0, symbol: symbol || 'EUR/USD', context: p == null ? null : { p, decision: decision || 'none' } });
+  const trades = [
+    T(1, 'up', 0.62, 'win', 'call'), T(2, 'up', 0.62, 'win', 'call'), T(3, 'up', 0.61, 'loss', 'call'), // a favor, 60%+
+    T(4, 'down', 0.40, 'win'),  // PUT com p(alta)=40% → 60% a favor
+    T(5, 'up', 0.45, 'loss'), T(6, 'up', 0.45, 'loss'),             // contra o modelo
+    T(7, 'up', 0.52, 'tie'),                                          // empate não entra no acerto
+    T(8, 'up', null, 'win', null, 'BTCUSDT'),                         // sem contexto (versão antiga)
+    { id: 9, side: 'up', result: 'void', pnl: 0, context: { p: 0.7, decision: 'call' } } // anulada: fora
+  ];
+  const r = S.report(trades);
+  assert.deepEqual([r.total.n, r.total.wins, r.total.ties], [7, 4, 1]);
+  assert.ok(r.total.low < r.total.rate && r.total.rate < r.total.high);
+  assert.deepEqual([r.comSinal.n, r.comSinal.wins], [3, 2]);
+  assert.deepEqual([r.semSinal.n, r.semSinal.wins], [3, 1]);
+  assert.deepEqual([r.aFavor.n, r.aFavor.wins], [4, 3]);
+  assert.deepEqual([r.contra.n, r.contra.wins], [2, 0]);
+  const f = Object.fromEntries(r.faixas.map(x => [x.label, x]));
+  assert.equal(f['60% ou mais'].n, 4); assert.equal(f['abaixo de 50%'].n, 2); assert.equal(f['50% a 55%'].n, 0); // o empate não conta
+  assert.equal(r.semContexto, 1);
+  assert.equal(r.porAtivo[0].chave, 'EUR/USD');
+});
+
+test('wilson: intervalo conhecido e amostra pequena muito larga', () => {
+  const [lo, hi] = S.wilson(55, 100);
+  assert.ok(Math.abs(lo - 0.452) < 0.002 && Math.abs(hi - 0.644) < 0.002, lo + ' ' + hi);
+  const [a, b] = S.wilson(4, 5);
+  assert.ok(b - a > 0.5, 'com 5 operações o intervalo é enorme');
+  assert.deepEqual(S.wilson(0, 0), [null, null]);
+});
+
+test('toCSV: cabeçalho, separador ";" e decimal com vírgula', () => {
+  const csv = S.toCSV([{ id: 1, t: Date.UTC(2026, 10, 24, 13, 2), expiry: Date.UTC(2026, 10, 24, 13, 7), symbol: 'EUR/USD', mode: 'binary', side: 'up', stake: 10, entry: 1.09571, exit: 1.09304, result: 'loss', pnl: -10, payoutPct: 85, context: { p: 0.6123, decision: 'call' }, source: 'manual', interval: '5m', horizon: 1, how: 'live' }]);
+  const [h, l] = csv.split('\n');
+  assert.ok(h.startsWith('id;entrada_utc;'));
+  assert.equal(l, '1;2026-11-24 13:02:00;2026-11-24 13:07:00;EUR/USD;binaria;alta;10,00;1,095710;1,093040;loss;-10,00;0,6123;0,6123;sim;manual;5m;1;85;;live');
+});

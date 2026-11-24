@@ -601,6 +601,7 @@
     }
     $('sim-hint').hidden = ready;
     renderTrades();
+    renderDesempenho();
   }
 
   function renderTrades() {
@@ -901,6 +902,52 @@
     const f = e.dataTransfer.files[0];
     if (!f) return;
     try { load(Data.parseCSV(await f.text()), f.name); } catch (err) { showError(err.message); }
+  });
+
+  // --- Desempenho das entradas (assertividade e calibração) ---
+  function renderDesempenho() {
+    const el = $('desempenho');
+    const todas = portfolio.closed.filter(t => t.result && t.result !== 'void');
+    if (!todas.length) { el.innerHTML = '<p class="note">Ainda não há operações encerradas. Cada entrada guarda o que o modelo dizia na hora, para medir a assertividade depois.</p>'; return; }
+    const blocos = [['binary', 'Opção binária'], ['fee', 'Binance (com taxas)']].map(([mode, nome]) => {
+      const list = todas.filter(t => (t.mode || 'binary') === mode);
+      if (!list.length) return '';
+      const r = Sim.report(list), tot = r.total, bin = mode === 'binary';
+      const pay = bin ? list.reduce((s, t) => s + (t.payoutPct || 85), 0) / list.length : null, be = bin ? 1 / (1 + pay / 100) : null;
+      const faixa = g => (g.n ? `${pct(g.low)} a ${pct(g.high)}` : '–');
+      const linha = (nome, g) => `<tr><td>${nome}</td><td>${g.n}</td><td>${pct(g.rate)}</td><td>${faixa(g)}</td></tr>`;
+      let veredito;
+      if (tot.n < 30) veredito = `Ainda é cedo: com ${tot.n} operação(ões) decidida(s), o acerto real pode estar em qualquer ponto entre ${pct(tot.low)} e ${pct(tot.high)}. Para separar habilidade de sorte são precisas algumas centenas.`;
+      else if (bin && tot.low > be) veredito = `O acerto está acima do ponto de empate (${pct(be)}) com 95% de confiança.`;
+      else if (bin && tot.high < be) veredito = `O acerto está abaixo do ponto de empate (${pct(be)}) com 95% de confiança: do jeito que está, dá prejuízo.`;
+      else veredito = bin ? `Ainda inconclusivo: o intervalo inclui o ponto de empate (${pct(be)}).` : 'Veja o resultado em dinheiro: com taxas, acertar mais da metade não basta se os ganhos forem menores que as perdas.';
+      const calib = r.faixas.filter(f => f.n).map(f => `<tr><td>${f.label}</td><td>${f.n}</td><td>${pct(f.pMedia)}</td><td>${pct(f.rate)}</td><td>${faixa(f)}</td></tr>`).join('');
+      const ativos = r.porAtivo.slice(0, 5).map(a => linha(Live.label(a.chave), a)).join('');
+      return `<div class="trades"><h4>${nome}</h4>
+        <div class="row"><span>Operações decididas${tot.ties ? ` (+${tot.ties} empate${tot.ties > 1 ? 's' : ''})` : ''}</span><b>${tot.n}</b></div>
+        <div class="row"><span>${bin ? 'Acerto' : 'Com lucro'} (intervalo de 95%)</span><b>${pct(tot.rate)} (${faixa(tot)})</b></div>
+        ${bin ? `<div class="row"><span>Ponto de empate (payout ${num(pay, 0)}%)</span><b>${pct(be)}</b></div>` : ''}
+        <div class="row"><span>Resultado</span><b class="${tot.pnl >= 0 ? 'pos' : 'neg'}">${smoney(tot.pnl)}</b></div>
+        <p class="note" style="margin:6px 0 8px">${veredito}</p>
+        <table><thead><tr><th>Entradas</th><th>n</th><th>Acerto</th><th>Intervalo 95%</th></tr></thead><tbody>
+          ${linha('Com sinal validado', r.comSinal)}${linha('Sem sinal validado', r.semSinal)}${linha('A favor do modelo', r.aFavor)}${linha('Contra o modelo', r.contra)}
+        </tbody></table>
+        ${calib ? `<h4>Calibração: o modelo dava, a favor da sua entrada…</h4><table><thead><tr><th>Faixa</th><th>n</th><th>Média</th><th>Real</th><th>Intervalo</th></tr></thead><tbody>${calib}</tbody></table>
+        <p class="note" style="margin:6px 0 0">Num modelo bem calibrado, a coluna "Real" fica perto da "Média" e dentro do intervalo. Diferenças com poucas operações por faixa são normais e não indicam nada.</p>` : ''}
+        ${r.porAtivo.length > 1 ? `<h4>Por ativo</h4><table><thead><tr><th>Ativo</th><th>n</th><th>Acerto</th><th>Intervalo 95%</th></tr></thead><tbody>${ativos}</tbody></table>` : ''}
+        ${r.semContexto ? `<p class="note" style="margin:6px 0 0">${r.semContexto} operação(ões) de versões antigas, sem a probabilidade do modelo, ficam fora da calibração.</p>` : ''}
+      </div>`;
+    }).join('');
+    el.innerHTML = blocos + '<p class="note" style="margin:8px 0 0">Calibrar o modelo olhando poucas operações é ajustá-lo ao acaso. Use este quadro para acompanhar; mudanças no modelo precisam ser testadas em operações novas.</p>';
+  }
+
+  $('exportar-csv').addEventListener('click', () => {
+    const csv = '﻿' + Sim.toCSV(portfolio.closed.concat(portfolio.open));
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = `coldigo-operacoes-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
 
   // --- Conta demo da Binance (via ponte local) ---
