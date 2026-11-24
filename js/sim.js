@@ -29,6 +29,24 @@
     return { fire: checks.every(c => c.ok), pending: false, side, pDir, checks, breakeven: be, tStar };
   }
 
+  /** Alerta no modo Binance. `m` = { p, research: resultado de Model.evaluateCosts, market }.
+   *  Dispara só se: operações suficientes fora da amostra, líquido médio (limite inferior) > 0,
+   *  excesso sobre a deriva (limite inferior) > 0 e probabilidade atual cobrindo a taxa. */
+  function evaluateAlertCosts(m, cfg) {
+    cfg = Object.assign({}, DEFAULT_CFG, cfg);
+    const r = m.research;
+    if (!r || m.p == null || !r.typicalNow) return { fire: false, pending: true, side: null, checks: [] };
+    const need = 0.5 + r.costRoundTrip / (2 * r.typicalNow);
+    const side = m.p >= 0.5 || m.market === 'spot' ? 'up' : 'down', pDir = side === 'up' ? m.p : 1 - m.p;
+    const checks = [
+      { key: 'sample', ok: r.n >= cfg.minN, value: r.n, need: cfg.minN },
+      { key: 'net', ok: r.net.low != null && r.net.low > 0, value: r.net.low, need: 0 },
+      { key: 'excess', ok: r.excess.low != null && r.excess.low > 0, value: r.excess.low, need: 0 },
+      { key: 'cover', ok: pDir >= need, value: pDir, need }
+    ];
+    return { fire: checks.every(c => c.ok), pending: false, side, pDir, need, checks };
+  }
+
   /** Converte as operações da estratégia (fora da amostra) em resultado financeiro. */
   function pnlTrades(trades, stake, payoutPct) {
     return trades.map(t => ({ ...t, result: t.hit ? 'win' : 'loss', pnl: t.hit ? round2(stake * payoutPct / 100) : -stake }));
@@ -72,6 +90,7 @@
       this.balance = round2(this.balance - o.stake);
       const trade = {
         id: ++this.seq, side: o.side, entry: o.price, t: o.t, stake: o.stake, payoutPct: o.payoutPct,
+        mode: o.feePct != null ? 'fee' : 'binary', feePct: o.feePct,
         horizon: o.horizon, intervalMs: o.intervalMs, expiry: o.t + o.horizon * o.intervalMs,
         symbol: o.symbol || '', source: o.source || 'manual'
       };
@@ -93,9 +112,16 @@
           approx = true;
         }
         const dir = tr.side === 'up' ? 1 : -1, diff = (price - tr.entry) * dir;
-        const result = diff > 0 ? 'win' : diff < 0 ? 'loss' : 'tie';
-        const pnl = result === 'win' ? round2(tr.stake * tr.payoutPct / 100) : result === 'loss' ? -tr.stake : 0;
-        this.balance = round2(this.balance + (result === 'win' ? tr.stake + pnl : result === 'tie' ? tr.stake : 0));
+        let result, pnl;
+        if (tr.mode === 'fee') { // Binance: ganha/perde o movimento e paga a taxa na entrada e na saída
+          pnl = round2(tr.stake * (dir * (price / tr.entry - 1) - 2 * tr.feePct / 100));
+          result = pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'tie';
+          this.balance = round2(this.balance + tr.stake + pnl);
+        } else { // opção binária: payout fixo, empate devolve
+          result = diff > 0 ? 'win' : diff < 0 ? 'loss' : 'tie';
+          pnl = result === 'win' ? round2(tr.stake * tr.payoutPct / 100) : result === 'loss' ? -tr.stake : 0;
+          this.balance = round2(this.balance + (result === 'win' ? tr.stake + pnl : result === 'tie' ? tr.stake : 0));
+        }
         const closed = Object.assign({}, tr, { exit: price, result, pnl, approx });
         this.closed.push(closed); done.push(closed);
       }
@@ -109,7 +135,7 @@
     toJSON() { return { start: this.start, balance: this.balance, open: this.open, closed: this.closed, seq: this.seq }; }
   }
 
-  const api = { evaluateAlert, pnlTrades, summarize, Portfolio, breakeven, candleAt, DEFAULT_CFG };
+  const api = { evaluateAlert, evaluateAlertCosts, pnlTrades, summarize, Portfolio, breakeven, candleAt, DEFAULT_CFG };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Coldigo = Object.assign(root.Coldigo || {}, { Sim: api });
 })(typeof self !== 'undefined' ? self : this);

@@ -82,3 +82,36 @@ test('Portfolio: serialização e reset', () => {
   assert.equal(q.balance, 490); assert.equal(q.open.length, 1);
   q.reset(); assert.equal(q.balance, 500); assert.equal(q.open.length, 0);
 });
+
+test('Portfolio com taxa (Binance): ganha o movimento menos a taxa de ida e volta', () => {
+  const p = new S.Portfolio({ start: 1000 });
+  const tr = p.openTrade(Object.assign({ side: 'up', feePct: 0.1 }, base, { stake: 100 }));
+  assert.equal(tr.mode, 'fee');
+  const [d] = p.settle(bars(tr.expiry - 60000, [100, 101]), tr.expiry + 1000); // +1%
+  assert.equal(d.pnl, 0.8); // 100 × (1% − 0,2%)
+  assert.equal(d.result, 'win');
+  assert.equal(p.balance, 1000.8);
+  const q = new S.Portfolio({ start: 1000 });
+  const sh = q.openTrade(Object.assign({ side: 'down', feePct: 0.05 }, base, { stake: 100 }));
+  const [e] = q.settle(bars(sh.expiry - 60000, [100, 100.05]), sh.expiry + 1000); // sobe 0,05% contra a venda
+  assert.equal(e.pnl, -0.15); assert.equal(e.result, 'loss');
+  // preço parado ainda paga a taxa
+  const r = new S.Portfolio({ start: 1000 });
+  const fl = r.openTrade(Object.assign({ side: 'up', feePct: 0.1 }, base, { stake: 100 }));
+  assert.equal(r.settle(bars(fl.expiry - 60000, [100, 100]), fl.expiry + 1000)[0].pnl, -0.2);
+});
+
+test('evaluateAlertCosts: exige amostra, líquido e excesso positivos e probabilidade que cubra a taxa', () => {
+  const research = over => Object.assign({ n: 80, net: { low: 0.001 }, excess: { low: 0.0005 }, costRoundTrip: 0.002, typicalNow: 0.01 }, over);
+  // need = 0,5 + 0,002 / 0,02 = 0,6
+  assert.equal(S.evaluateAlertCosts({ p: 0.62, research: research(), market: 'spot' }, {}).fire, true);
+  assert.equal(S.evaluateAlertCosts({ p: 0.58, research: research(), market: 'spot' }, {}).fire, false);
+  assert.equal(S.evaluateAlertCosts({ p: 0.62, research: research({ net: { low: -0.001 } }), market: 'spot' }, {}).fire, false);
+  assert.equal(S.evaluateAlertCosts({ p: 0.62, research: research({ excess: { low: -0.001 } }), market: 'spot' }, {}).fire, false);
+  assert.equal(S.evaluateAlertCosts({ p: 0.62, research: research({ n: 5 }), market: 'spot' }, {}).fire, false);
+  const fut = S.evaluateAlertCosts({ p: 0.37, research: research(), market: 'futures' }, {});
+  assert.equal(fut.side, 'down'); assert.equal(fut.fire, true);
+  // à vista nunca sugere venda
+  const sp = S.evaluateAlertCosts({ p: 0.37, research: research(), market: 'spot' }, {});
+  assert.equal(sp.side, 'up'); assert.equal(sp.fire, false);
+});

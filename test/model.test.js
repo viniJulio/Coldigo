@@ -154,3 +154,56 @@ test('padrão calibrado: não é superconfiante num passeio aleatório (regress�
   assert.ok(nw / N > -0.01, 'ganho Brier médio do padrão: ' + nw / N);
   assert.ok(nw / N > old / N + 0.005, 'o padrão deve calibrar melhor que λ=10 com 16 variáveis');
 });
+
+// ---------- custos (Binance) ----------
+function drifting(n, seed, mu) {
+  const rnd = F.mulberry32(seed); let price = 100; const out = [], t0 = Date.UTC(2025, 0, 1);
+  for (let i = 0; i < n; i++) { const o = price; price = o * Math.exp(mu + 0.002 * gauss(rnd)); out.push({ t: t0 + i * MIN, o, h: Math.max(o, price), l: Math.min(o, price), c: price, v: 100 }); }
+  return out;
+}
+
+test('custos: sinal forte e taxa pequena é validado; à vista nunca vende', () => {
+  const c = series(7000, 21, 3), H = 3; // sinal plantado bem forte
+  const wf = M.walkForward(c, I.computeAll(c), H, { keepTies: true });
+  const fut = M.evaluateCosts(wf.preds, c, H, { market: 'futures', feePct: 0.005 });
+  assert.ok(fut.validated, JSON.stringify({ n: fut.n, low: fut.net.low, ex: fut.excess.low }));
+  assert.ok(fut.trades.some(t => t.side === 'down'));
+  const spot = M.evaluateCosts(wf.preds, c, H, { market: 'spot', feePct: 0.005 });
+  assert.ok(spot.n > 0 && spot.trades.every(t => t.side === 'up'));
+  for (let k = 1; k < fut.trades.length; k++) assert.ok(fut.trades[k].i - fut.trades[k - 1].i >= H);
+  // a conta fecha: líquido = direção × movimento − custo de ida e volta
+  const t = fut.trades[0], dir = t.side === 'up' ? 1 : -1;
+  assert.ok(Math.abs(t.net - (dir * (c[t.i + H].c / c[t.i].c - 1) - 2 * 0.005 / 100)) < 1e-12);
+});
+
+test('custos: taxa alta elimina as entradas; passeio aleatório não é validado', () => {
+  const c = series(5000, 7, 1), H = 3;
+  const wf = M.walkForward(c, I.computeAll(c), H, { keepTies: true });
+  assert.equal(M.evaluateCosts(wf.preds, c, H, { market: 'futures', feePct: 5 }).n, 0);
+  let validated = 0;
+  for (let s = 1; s <= 8; s++) {
+    const r = series(4500, 300 + s, 0), w = M.walkForward(r, I.computeAll(r), H, { keepTies: true });
+    if (M.evaluateCosts(w.preds, r, H, { market: 'futures', feePct: 0.02 }).validated) validated++;
+  }
+  assert.ok(validated <= 1, 'falsos positivos ' + validated);
+});
+
+test('custos: subir por subir não conta (mercado em alta sem sinal não é validado)', () => {
+  let validated = 0, positive = 0;
+  for (let s = 1; s <= 6; s++) {
+    const c = drifting(4500, 40 + s, 0.0006), H = 3; // alta forte e constante, sem nenhum sinal previsível
+    const w = M.walkForward(c, I.computeAll(c), H, { keepTies: true });
+    const ev = M.evaluateCosts(w.preds, c, H, { market: 'spot', feePct: 0.01 });
+    if (ev.net.mean > 0) positive++;
+    if (ev.validated) validated++;
+  }
+  assert.ok(positive >= 4, 'em alta, comprar costuma dar lucro bruto: ' + positive);
+  assert.equal(validated, 0, 'mas o lucro vem da deriva, não do modelo');
+});
+
+test('evaluate (binário) ignora candles sem rótulo quando keepTies está ligado', () => {
+  const c = series(4000, 5, 1);
+  const a = M.evaluate(M.walkForward(c, I.computeAll(c), 3, {}).preds, 3, 85, {});
+  const b = M.evaluate(M.walkForward(c, I.computeAll(c), 3, { keepTies: true }).preds, 3, 85, {});
+  assert.equal(a.n, b.n); assert.equal(a.auc, b.auc);
+});
