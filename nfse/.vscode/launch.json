@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "NFS-e: servidor (ADN simulado)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/server.js",
+      "runtimeArgs": ["--disable-warning=ExperimentalWarning"],
+      "env": { "NFSE_ADN": "simulador", "PORT": "8090" },
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "NFS-e: testes",
+      "type": "node",
+      "request": "launch",
+      "runtimeArgs": ["--disable-warning=ExperimentalWarning", "--test", "test/"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    }
+  ]
+}

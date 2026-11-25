@@ -4,10 +4,19 @@ Portal multi-escritório que busca todo dia, no Portal Nacional da NFS-e, as not
 
 Sem dependências npm. Precisa de **Node 22.13+** (usa `node:sqlite`) e do **openssl** no servidor (para ler o certificado A1).
 
+## Abrir no VS Code
+
+1. Instale o **Node 22.13 ou mais novo** (`node -v` para conferir) e o **openssl** (já vem no macOS/Linux; no Windows use o Git Bash ou instale o OpenSSL).
+2. No VS Code: **Arquivo > Abrir Pasta…** e escolha esta pasta (`nfse-contadores`).
+3. No terminal do VS Code (**Ctrl+'**):
+
 ```bash
-npm run nfse        # http://localhost:8090  (ADN simulado, dados fictícios)
-npm run nfse:test   # 23 testes (isolamento entre escritórios, sincronização, acesso, ZIP)
+npm start       # http://localhost:8090  (ADN simulado, dados fictícios)
+npm test        # 23 testes (isolamento entre escritórios, sincronização, acesso, ZIP)
+npm run dev     # igual ao start, reinicia ao salvar arquivos
 ```
+
+Também dá para usar o **F5** (depurar o servidor) ou **Terminal > Executar tarefa**. Não há `npm install`: o projeto não tem dependências. Para abrir no celular na mesma rede Wi-Fi, use `http://IP-DO-SEU-COMPUTADOR:8090`.
 
 ## Como o acesso é separado
 

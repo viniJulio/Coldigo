@@ -1,0 +1,4 @@
+node_modules/
+# banco, chave mestra e certificados ficam só na sua máquina
+data/
+.DS_Store

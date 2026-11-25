@@ -1,0 +1,12 @@
+{
+  "name": "nfse-contadores",
+  "version": "0.1.0",
+  "description": "Portal multi-escritório que baixa e organiza as NFS-e dos clientes de escritórios de contabilidade",
+  "private": true,
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch server.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+  }
+}
