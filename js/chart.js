@@ -11,7 +11,7 @@
       this.ctx = canvas.getContext('2d');
       this.tooltip = tooltipEl;
       this.candles = []; this.an = null; this.markers = []; this.dec = 2;
-      this.show = { vwap: true, ema: true, bb: false, levels: true, forecast: true, volume: true, rsi: true, targets: true };
+      this.show = { vwap: true, ema: true, bb: false, levels: true, forecast: true, volume: true, rsi: true, targets: false };
       this.view = { start: 0, count: 100 };
       this.mouse = null; this.drag = null;
       this._bind();

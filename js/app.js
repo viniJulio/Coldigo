@@ -4,7 +4,7 @@
   Forex.PAIRS.forEach(a => { if (!Live.asset(a.symbol)) Live.ASSETS.push(a); }); // pares de câmbio real no mesmo catálogo
   const $ = id => document.getElementById(id);
 
-  const params = { horizon: 12, simulations: 2000, window: 300, driftFactor: 0.1, tpAtr: 1.5, slAtr: 1, payout: 85, history: 6000, trainN: 2500, market: 'spot', feePct: 0.1 };
+  const params = { horizon: 12, simulations: 2000, window: 300, driftFactor: 0, tpAtr: 1.5, slAtr: 1, payout: 85, history: 6000, trainN: 2500, market: 'spot', feePct: 0.1 };
   const alertCfg = Object.assign({}, Sim.DEFAULT_CFG);
   const prefs = { stake: 10, auto: false, sound: true, ponteUrl: 'http://127.0.0.1:8787', ponteCodigo: '', ponteValor: 20, ponteEnviar: false, tdKey: '' };
   const state = { candles: [], analysis: null, source: '', live: null, liveLen: 0, alert: null, alertLog: [], bannerDismissed: null, research: null, pred: null, closedSince: 0, dec: 2 };
@@ -96,6 +96,7 @@
   }
 
   // Cartões de análise: refeitos a cada atualização (não contêm campos editáveis)
+  let tecnicaAberta = false;
   function renderMain() {
     const a = state.analysis, f = a.forecast, last = f.bands[f.horizon - 1];
     const pos = ((a.score + 1) / 2) * 100;
@@ -122,55 +123,48 @@
     else if (main.hitRate > 0.55 && main.avgReturnPct > 0) verdict = 'Neste histórico o sinal acertou acima do acaso. É resultado em amostra, sem garantia futura.';
     else verdict = 'Neste histórico o sinal não mostrou vantagem estatística clara. Use com cautela.';
 
+    // Uma única fonte de direção: o modelo. O cone mostra só o tamanho provável do movimento.
+    const pModelo = state.pred && state.research && state.research.status === 'done' ? state.pred.p : null;
     $('sec-main').innerHTML = `
       <div class="card">
-        <h3>Viés por indicadores · referência, não validado</h3>
+        <h3>Tamanho provável do movimento (${f.horizon} candles)</h3>
+        <div class="row"><span>Faixa 50% provável</span><b>${px(last.p25)} – ${px(last.p75)}</b></div>
+        <div class="row"><span>Faixa 80% provável</span><b>${px(last.p10)} – ${px(last.p90)}</b></div>
+        <div class="row"><span>Máxima esperada (mediana)</span><b>${px(f.expectedHigh.p50)}</b></div>
+        <div class="row"><span>Mínima esperada (mediana)</span><b>${px(f.expectedLow.p50)}</b></div>
+        <div class="row"><span>Chance de fechar acima (modelo)</span><b>${pModelo == null ? 'calculando…' : pct(pModelo)}</b></div>
+        <p class="note" style="margin:6px 0 0">${params.driftFactor > 0 ? 'O cone inclui a inclinação dos indicadores (Parâmetros → Cone de projeção), que não é validada.' : 'O cone no gráfico mostra só o quanto o preço costuma andar nesse tempo, sem direção. A direção vem apenas do modelo, que é o que o simulador e o teste automático seguem.'}</p>
+      </div>
+
+      <details class="card tecnica"${tecnicaAberta ? ' open' : ''}>
+        <summary>Leitura técnica · referência, não usada nas entradas</summary>
+        <p class="note" style="margin:8px 0 10px">Indicadores clássicos (médias, VWAP, RSI, Bollinger, suportes e resistências). Servem para ler o gráfico, não para decidir a entrada: nos testes com dados reais, seguir este viés em 1 a 5 minutos acertou 44% a 49%, porque em prazos curtos o preço costuma corrigir depois de um movimento.</p>
+
+        <h4>Viés por indicadores</h4>
         <div class="bias ${a.bias}"><span class="label">${BIAS_TEXT[a.bias]}</span><b>${sgn(a.score)}</b></div>
         <div class="gauge"><i style="left:${pos}%"></i></div>
         <div class="legend"><span>−1 baixa</span><span style="margin-left:auto">+1 alta</span></div>
         <p class="note" style="margin:8px 0 0">${reasons(a)}</p>
-        <p class="note" style="margin:6px 0 0">Não é o sinal de entrada. Nos testes com dados reais, seguir este viés em 1 a 5 minutos acertou 44% a 49%: em prazos curtos o preço costuma corrigir depois de um movimento. O simulador e o teste automático seguem o modelo.</p>
-      </div>
 
-      <div class="card">
-        <h3>Movimentação estimada</h3>
-        <div class="row"><span>Mediana no fim do horizonte</span><b>${px(last.p50)} (${sgn((last.p50 - f.entry) / f.entry * 100)}%)</b></div>
-        <div class="row"><span>Faixa 50% provável</span><b>${px(last.p25)} – ${px(last.p75)}</b></div>
-        <div class="row"><span>Faixa 80% provável</span><b>${px(last.p10)} – ${px(last.p90)}</b></div>
-        <div class="row"><span>Probabilidade de fechar acima</span><b>${pct(f.probUp)}</b></div>
-        <div class="row"><span>Máxima esperada (mediana)</span><b>${px(f.expectedHigh.p50)}</b></div>
-        <div class="row"><span>Mínima esperada (mediana)</span><b>${px(f.expectedLow.p50)}</b></div>
-        <div class="legend" style="margin-top:6px"><span><i style="background:var(--c-forecast)"></i>cone no gráfico: 50% e 80%</span></div>
-      </div>
+        <h4>Composição do score</h4>
+        <div class="parts">${partsHtml}</div>
 
-      <div class="card">
-        <h3>${sideName} · alvo ${params.tpAtr}× ATR / stop ${params.slAtr}× ATR</h3>
+        <h4>Níveis relevantes</h4>
+        ${lvl(a.resistances, 'R')}
+        ${a.pivots ? `<div class="row"><span>Pivô (PP) pregão anterior</span><b>${px(a.pivots.PP)}</b></div>` : ''}
+        ${lvl(a.supports, 'S')}
+
+        <h4>${sideName} pelos indicadores · alvo ${params.tpAtr}× ATR / stop ${params.slAtr}× ATR</h4>
         <div class="row"><span>Entrada</span><b>${px(f.entry)}</b></div>
         <div class="row"><span>Alvo</span><b class="pos">${px(f.entry + dirTp * f.tpDistance)}</b></div>
         <div class="row"><span>Stop</span><b class="neg">${px(f.entry - dirTp * f.slDistance)}</b></div>
         <div class="prob" title="alvo / stop / nenhum"><i style="width:${sideData.tp * 100}%"></i><i style="width:${sideData.sl * 100}%"></i><i style="width:${sideData.none * 100}%"></i></div>
         <div class="legend"><span><i style="background:var(--up)"></i>alvo ${pct(sideData.tp)}</span><span><i style="background:var(--down)"></i>stop ${pct(sideData.sl)}</span><span><i style="background:var(--muted)"></i>nenhum ${pct(sideData.none)}</span></div>
-        <div class="row" style="margin-top:6px"><span>Razão risco/retorno</span><b>1 : ${num(params.tpAtr / params.slAtr)}</b></div>
-        ${a.bias === 'neutral' ? '<p class="note">Viés neutro: mostrando o lado comprado como referência.</p>' : ''}
-      </div>
 
-      <div class="card parts">
-        <h3>Composição do score</h3>
-        ${partsHtml}
-      </div>
-
-      <div class="card">
-        <h3>Níveis relevantes</h3>
-        ${lvl(a.resistances, 'R')}
-        ${a.pivots ? `<div class="row"><span>Pivô (PP) pregão anterior</span><b>${px(a.pivots.PP)}</b></div>` : ''}
-        ${lvl(a.supports, 'S')}
-      </div>
-
-      <div class="card">
-        <h3>Backtest do score por indicadores (horizonte ${f.horizon})</h3>
+        <h4>Backtest do score por indicadores (horizonte ${f.horizon})</h4>
         <table><thead><tr><th>Score</th><th>Sinais</th><th>Acerto</th><th>Retorno médio</th></tr></thead><tbody>${btRows}</tbody></table>
         <p class="note" style="margin:8px 0 0">Taxa de alta do período: ${bt.baseUpRate == null ? '–' : pct(bt.baseUpRate)} em ${bt.baseSamples} janelas (sobrepostas: os sinais não são independentes). ${verdict}</p>
-      </div>`;
+      </details>`;
 
     const note = $('p-note');
     if (note) note.textContent = `${f.simulations} trajetórias por bootstrap dos candles recentes (σ por candle ${num(f.sigma * 100, 3)}%). Se alvo e stop caírem no mesmo candle, conta-se o stop.`;
@@ -273,6 +267,8 @@
     bind('p-sims', v => { params.simulations = Math.max(200, Math.min(20000, Math.round(v))); }, reanalyze(false, false));
   }
 
+  $('sec-main').addEventListener('toggle', e => { if (e.target.matches && e.target.matches('details.tecnica')) tecnicaAberta = e.target.open; }, true);
+
   // --- Pesquisa (validação fora da amostra) e decisão ---
   const CHECK_LABELS = {
     sample: ['Operações independentes validadas (fora da amostra)', c => `${c.value} ≥ ${c.need}`],
@@ -355,6 +351,7 @@
     if (notify) rodarTeste(c[m]);
     if (notify && res && res.fire) fireAlert(res, c[m]);
     renderDecision();
+    if (state.analysis) renderMain();
   }
 
   function fireAlert(res, last) {
@@ -419,7 +416,8 @@
           <b>▲ ${pct(pUp)} &nbsp; ▼ ${pct(1 - pUp)}</b></div>
         <div class="gauge mid"><i style="left:${pos}%"></i></div>
         <ul class="checks">${checks}</ul>
-        <p class="note" style="margin:8px 0 0">${MARKET_TXT[r.market]}, taxa ${num(params.feePct, 2)}% por lado (${pctp(evc.costRoundTrip)} ida e volta). Movimento típico em ${params.horizon} candles: ${evc.typicalNow ? pctp(evc.typicalNow).replace('+', '') : '–'}. Tudo medido <b>fora da amostra</b>.</p>
+        <p class="note" style="margin:8px 0 0">A direção das entradas vem só deste modelo. Ele pode apontar contra a tendência visível no gráfico, porque em 1 a 5 minutos o preço costuma corrigir depois de um movimento.</p>
+        <p class="note" style="margin:6px 0 0">${MARKET_TXT[r.market]}, taxa ${num(params.feePct, 2)}% por lado (${pctp(evc.costRoundTrip)} ida e volta). Movimento típico em ${params.horizon} candles: ${evc.typicalNow ? pctp(evc.typicalNow).replace('+', '') : '–'}. Tudo medido <b>fora da amostra</b>.</p>
         <p class="note" style="margin:6px 0 0">${evc.n ? 'Fora da amostra, a regra teria feito ' + sumR : 'Fora da amostra, a probabilidade nunca cobriu a taxa: a regra não teria feito nenhuma operação.'} Comprar sempre teria dado ${pctp(evc.holdAllNet)} por operação.</p>
         <details class="more"><summary>Detalhes da validação</summary>
           <div class="row"><span>Operações fora da amostra</span><b>${evc.n}</b></div>
@@ -440,7 +438,8 @@
           <b>▲ ${pct(pUp)} &nbsp; ▼ ${pct(1 - pUp)}</b></div>
         <div class="gauge mid"><i style="left:${pos}%"></i></div>
         <ul class="checks">${checks}</ul>
-        <p class="note" style="margin:8px 0 0">Tudo é medido <b>fora da amostra</b>: o modelo prevê candles que ele não viu no treino. Limiar de entrada ${pct(ev.tStar)} (empate ${pct(ev.breakeven)} + margem), definido antes de olhar os resultados.</p>
+        <p class="note" style="margin:8px 0 0">A direção das entradas vem só deste modelo. Ele pode apontar contra a tendência visível no gráfico, porque em 1 a 5 minutos o preço costuma corrigir depois de um movimento.</p>
+        <p class="note" style="margin:6px 0 0">Tudo é medido <b>fora da amostra</b>: o modelo prevê candles que ele não viu no treino. Limiar de entrada ${pct(ev.tStar)} (empate ${pct(ev.breakeven)} + margem), definido antes de olhar os resultados.</p>
         <p class="note" style="margin:6px 0 0">${st.trades === 0 ? 'Fora da amostra, a regra não teria feito nenhuma operação.' :
           `Fora da amostra, a regra teria feito ${st.trades} operações (sem sobreposição): acerto ${pct(st.winRate)}, resultado ${smoney(st.pnl)} com ${money(prefs.stake)} por operação, maior queda ${money(st.maxDrawdown)}.`}</p>
         <details class="more"><summary>Detalhes da validação</summary>

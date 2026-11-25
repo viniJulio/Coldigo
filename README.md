@@ -24,6 +24,10 @@ O botão **Ao vivo** busca o histórico e acompanha o preço em tempo real pelo 
 
 Compara a expiração escolhida (o horizonte, em candles) com o **ponto de empate** do seu payout: `1 / (1 + payout)`, ou 54,1% para 85%. Mostra a probabilidade do modelo, o acerto histórico do sinal naquela força de score e o **limite inferior de 95%** (intervalo de Wilson, com a amostra reduzida porque as janelas se sobrepõem). O veredito só diz que há vantagem quando esse limite inferior supera o ponto de empate.
 
+### Como ler a tela
+
+Só **o modelo** (cartão **Decisão e validação do modelo**) dá a direção das entradas, no simulador, no teste automático e nos alertas. O cartão **Tamanho provável do movimento** e o cone no gráfico mostram só o quanto o preço costuma andar no tempo da operação (volatilidade), sem direção, mais a chance de fechar acima segundo o modelo. Os indicadores clássicos (viés por médias, VWAP, RSI, Bollinger, níveis, alvo e stop) ficam em **Leitura técnica · referência, não usada nas entradas**, recolhida: nos testes com dados reais, seguir esse viés em 1 a 5 minutos acertou 44% a 49%, porque em prazos curtos o preço costuma corrigir depois de um movimento. Por isso o modelo pode apontar contra a tendência visível no gráfico.
+
 ### Modelo e validação fora da amostra
 
 O alerta não usa mais o score por indicadores (que continua na tela só como referência). Ele usa um **modelo estatístico treinado nos dados**, e só fala quando a validação mostra vantagem:
