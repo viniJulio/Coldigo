@@ -54,8 +54,8 @@
 
   // ---------- Teste automático (plano fixo) ----------
   /** Decide o que o teste automático faz no fechamento de um candle.
-   *  plano: { symbol, interval, horizon, market, limiar, meta, encerrado }
-   *  agora: { live, symbol, interval, horizon, market, p, abertas, concluidas }
+   *  plano: { symbol, interval, horizon, market, limiar, meta, encerrado, filtroTendencia }
+   *  agora: { live, symbol, interval, horizon, market, p, abertas, concluidas, vies ('up'|'down'|'neutral', dos indicadores) }
    *  Retorna { acao: 'entrar', side, pDir } ou { acao: 'pular' | 'pausado' | 'encerrado', motivo }. */
   function decidirTeste(plano, agora) {
     if (!plano || plano.encerrado) return { acao: 'encerrado', motivo: 'sem teste em andamento' };
@@ -68,7 +68,8 @@
     const side = agora.p >= 0.5 ? 'up' : 'down', pDir = side === 'up' ? agora.p : 1 - agora.p;
     if (pDir < plano.limiar) return { acao: 'pular', motivo: 'modelo abaixo do limite', pDir };
     if (plano.market === 'spot' && side === 'down') return { acao: 'pular', motivo: 'modelo aponta queda, e à vista só se compra', pDir };
-    return { acao: 'entrar', side, pDir };
+    if (plano.filtroTendencia && agora.vies !== side) return { acao: 'pular', motivo: 'os indicadores não concordam com o modelo', pDir, semConcordancia: true };
+    return { acao: 'entrar', side, pDir, contraMovimento: agora.vies != null && agora.vies !== 'neutral' && agora.vies !== side };
   }
 
   // ---------- Desempenho das entradas do usuário ----------
