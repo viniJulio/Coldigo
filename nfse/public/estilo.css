@@ -40,3 +40,35 @@ button:disabled { opacity: .5; cursor: wait; }
 .suave { color: var(--suave); } .vazio { padding: 24px; text-align: center; color: var(--suave); }
 .entrada { max-width: 420px; margin: 8vh auto; padding: 0 16px; }
 .abas { display: flex; gap: 6px; margin-bottom: 12px; } .abas button { flex: 1; }
+
+/* ---------- celular e telas estreitas ---------- */
+.botao, button { min-height: 40px; }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--marca); outline-offset: 2px; }
+@media (max-width: 720px) {
+  body { font-size: 16px; }
+  input, select { font-size: 16px; min-height: 44px; } /* 16px evita o zoom automático do iPhone */
+  button, .botao { min-height: 44px; padding: 10px 16px; }
+  .topo { gap: 8px 12px; padding: 10px 14px; padding-top: max(10px, env(safe-area-inset-top)); }
+  .topo .escritorio { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topo > .suave { display: none; }
+  .topo nav { order: 3; flex-basis: 100%; flex-wrap: nowrap; overflow-x: auto; gap: 6px; padding-bottom: 2px; -webkit-overflow-scrolling: touch; }
+  .topo nav a { white-space: nowrap; padding: 10px 12px; }
+  .conteudo { padding: 14px 14px max(48px, env(safe-area-inset-bottom)); }
+  h1 { font-size: 20px; }
+  .grade { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .cartao { padding: 14px; }
+  .form { grid-template-columns: 1fr; }
+  .linha-acoes > button, .linha-acoes > .botao, .linha-acoes > select { flex: 1 1 100%; text-align: center; }
+  .entrada { margin: 4vh auto; }
+
+  /* tabela -> lista de cartões */
+  .rolagem { overflow: visible; padding: 4px 14px; }
+  table, tbody, tr, td { display: block; width: 100%; }
+  thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  tr { padding: 10px 0; border-bottom: 1px solid var(--linha); }
+  tbody tr:last-child { border-bottom: 0; }
+  td { display: flex; justify-content: space-between; gap: 12px; border: 0; padding: 4px 0; text-align: right; overflow-wrap: anywhere; }
+  td::before { content: attr(data-label); color: var(--suave); font-size: 13px; text-align: left; flex: none; }
+  td:not([data-label])::before, td[data-label=""]::before { content: none; }
+  td.num { text-align: right; }
+}

@@ -88,7 +88,7 @@ function telaEntrada() {
 }
 
 // ---------- estrutura ----------
-const ROTAS = [['painel', 'Painel'], ['clientes', 'Clientes'], ['alertas', 'Alertas'], ['equipe', 'Equipe'], ['escritorio', 'Certificado do escritório']];
+const ROTAS = [['painel', 'Painel'], ['clientes', 'Clientes'], ['alertas', 'Alertas'], ['equipe', 'Equipe'], ['escritorio', 'Certificado']];
 const ehAdmin = () => eu && eu.papel !== 'membro';
 
 function moldura(conteudo, ativa) {
@@ -162,9 +162,10 @@ async function paginaCliente(id) {
             h('td', null, n.direcao === 'emitida' ? (n.tomador_nome || cnpjFmt(n.tomador_doc)) : `${n.prestador_nome || ''} ${cnpjFmt(n.prestador_cnpj)}`),
             h('td', null, n.status === 'cancelada' ? h('span', { class: 'etiqueta perigo' }, 'cancelada') : h('span', { class: 'etiqueta ok' }, 'normal')),
             h('td', { class: 'num' }, brl(n.valor_centavos)),
-            h('td', null, h('a', { href: `/api/notas/${n.id}/xml` }, 'XML'), ' · ', h('a', { href: `/api/notas/${n.id}/pdf` }, 'PDF')))))),
+            h('td', null, h('span', null, h('a', { href: `/api/notas/${n.id}/xml` }, 'XML'), ' · ', h('a', { href: `/api/notas/${n.id}/pdf` }, 'PDF'))))))),
         h('p', { class: 'suave' }, `${r.total} nota(s)${r.total > r.itens.length ? `, mostrando as ${r.itens.length} mais recentes` : ''}.`))
         : h('div', { class: 'vazio' }, 'Nenhuma nota neste filtro.'));
+      rotularTabelas(tabela);
     } catch (e) { avisar(msg, 'erro', e.message); }
   }
   mes.addEventListener('change', carregar); dir.addEventListener('change', carregar);
@@ -263,6 +264,15 @@ async function router() {
   try { conteudo = rota === 'cliente' ? await paginaCliente(arg) : await (paginas[rota] || paginaPainel)(); }
   catch (e) { conteudo = caixa('erro', e.message); }
   raiz.replaceChildren(moldura(conteudo, ativa));
+  rotularTabelas(raiz);
+}
+
+// No celular as tabelas viram cartões; cada célula mostra o título da sua coluna (via CSS attr()).
+function rotularTabelas(el) {
+  for (const t of el.querySelectorAll('table')) {
+    const titulos = [...t.querySelectorAll('thead th')].map((th) => th.textContent);
+    for (const tr of t.querySelectorAll('tbody tr')) [...tr.children].forEach((td, i) => { if (titulos[i]) td.setAttribute('data-label', titulos[i]); });
+  }
 }
 
 function desenhar() { if (eu) router(); else raiz.replaceChildren(telaEntrada()); }
