@@ -207,3 +207,17 @@ test('evaluate (binário) ignora candles sem rótulo quando keepTies está ligad
   const b = M.evaluate(M.walkForward(c, I.computeAll(c), 3, { keepTies: true }).preds, 3, 85, {});
   assert.equal(a.n, b.n); assert.equal(a.auc, b.auc);
 });
+
+test('calibrações prontas: configurações válidas e treináveis, saídas de 5, 10 e 15 min', () => {
+  const L = require('../js/live.js');
+  assert.deepEqual(M.CALIBRACOES.map(c => c.horizon * L.INTERVAL_MS[c.interval] / MIN), [5, 10, 15]);
+  const c = series(4000, 11, 0), { X } = M.buildFeatures(c, I.computeAll(c));
+  for (const cal of M.CALIBRACOES) {
+    assert.ok(cal.modelo.features.every(f => M.FEATURES.includes(f)), cal.id);
+    assert.ok(cal.limiar > 0.5 && cal.limiar < 0.7 && cal.confirmacao.n >= 100, cal.id);
+    const m = M.fitLatest(c, X, M.labels(c, cal.horizon), cal.horizon, cal.modelo, c.length - 1);
+    assert.equal(m.cols.length, cal.modelo.features.length, cal.id);
+    const p = M.predictProb(m, X[c.length - 1]);
+    assert.ok(p > 0 && p < 1, cal.id);
+  }
+});

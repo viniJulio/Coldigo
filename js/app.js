@@ -40,6 +40,7 @@
   const repaired = portfolio.repair(); // anula operações liquidadas com preço de outro ativo (erro antigo)
   let tests = Array.isArray(saved.tests) ? saved.tests : [];
   let teste = saved.teste || null; // plano do teste automático
+  const CALIB = new Map(Model.CALIBRACOES.map(c => [c.id, c])); // calibrações prontas do teste automático
   Object.assign(prefs, saved.prefs);
   Object.assign(alertCfg, saved.alertCfg);
   Object.assign(params, saved.params);
@@ -348,7 +349,7 @@
       ? Sim.evaluateAlertCosts({ p: state.pred.p, research: r.evc, market: r.market }, alertCfg)
       : Sim.evaluateAlert({ p: state.pred.p, research: r.ev }, alertCfg, params.payout);
     state.alert = res && { res, candleT: c[m].t };
-    if (notify) rodarTeste(c[m]);
+    if (notify) rodarTeste(c[m], previsaoDoTeste(c, X, m));
     if (notify && res && res.fire) fireAlert(res, c[m]);
     renderDecision();
     if (state.analysis) renderMain();
@@ -547,7 +548,11 @@
     portfolio.openTrade({
       side, price: last.c, t: opts.t || Date.now(), stake: prefs.stake, plano: opts.plano, payoutPct: params.payout, horizon: params.horizon,
       feePct: isFee() ? params.feePct : undefined, interval: state.live.interval,
-      context: (() => { const d = decisionState(); return { p: state.pred ? state.pred.p : null, decision: d.kind, text: d.text, market: params.market }; })(),
+      context: (() => {
+        const d = decisionState(), ctx = { p: opts.p != null ? opts.p : state.pred ? state.pred.p : null, decision: d.kind, text: d.text, market: params.market };
+        if (opts.calib) ctx.calib = opts.calib; // entrada decidida pelo modelo calibrado do teste
+        return ctx;
+      })(),
       intervalMs: state.live.intervalMs, symbol: state.live.symbol, source
     });
     persist(); syncMarkers(); renderSim();
@@ -911,12 +916,22 @@
   // --- Teste automático ---
   const doTeste = () => (teste ? portfolio.open.concat(portfolio.closed).filter(t => t.plano === teste.id) : []);
 
-  function rodarTeste(candle) {
+  // Teste com calibração: usa o modelo calibrado (variáveis, regularização e janela próprios), não o do painel
+  function previsaoDoTeste(c, X, m) {
+    if (!teste || teste.encerrado || !teste.modelo || !state.live || state.live.symbol !== teste.symbol || state.live.interval !== teste.interval) return null;
+    try {
+      const mod = Model.fitLatest(c, X, Model.labels(c, teste.horizon), teste.horizon, teste.modelo, m);
+      return mod && X[m] ? Model.predictProb(mod, X[m]) : null;
+    } catch (_) { return null; }
+  }
+
+  function rodarTeste(candle, pCalibrado) {
     if (!teste || teste.encerrado) return;
     const ops = doTeste();
+    const p = teste.modelo ? pCalibrado : state.pred ? state.pred.p : null;
     const d = Sim.decidirTeste(teste, {
       live: !!state.live && liveStatus === 'live', symbol: state.live && state.live.symbol, interval: state.live && state.live.interval,
-      horizon: params.horizon, market: params.market, p: state.pred ? state.pred.p : null,
+      horizon: params.horizon, market: params.market, p,
       abertas: ops.filter(t => !t.result).length, concluidas: ops.filter(t => t.result && t.result !== 'void').length,
       vies: state.analysis ? state.analysis.bias : 'neutral'
     });
@@ -924,7 +939,7 @@
     if (d.acao === 'encerrado' && d.motivo === 'meta atingida') { teste.encerrado = true; teste.fim = Date.now(); }
     else if (d.acao === 'entrar') {
       try { // entra no fechamento oficial do candle: o vencimento cai no fechamento de um candle futuro
-        enterTrade(d.side, 'teste', { soSimulador: true, plano: teste.id, t: candle.t + state.live.intervalMs });
+        enterTrade(d.side, 'teste', { soSimulador: true, plano: teste.id, t: candle.t + state.live.intervalMs, p, calib: teste.calib });
         teste.entradas++;
       } catch (e) { d.motivo = e.message; }
     } else if (d.acao === 'pular' && d.semConcordancia) teste.semConcordancia = (teste.semConcordancia || 0) + 1;
@@ -937,12 +952,16 @@
   function renderTeste() {
     const st = $('teste-status');
     $('teste-form').hidden = !!(teste && !teste.encerrado);
-    $('teste-filtro-wrap').hidden = $('teste-filtro-nota').hidden = !!(teste && !teste.encerrado);
+    const calibSel = CALIB.get($('teste-calib').value);
+    $('teste-filtro-wrap').hidden = $('teste-filtro-nota').hidden = !!(teste && !teste.encerrado) || !!calibSel;
+    $('teste-calib-nota').hidden = !!(teste && !teste.encerrado) || !calibSel;
+    $('teste-iniciar').textContent = calibSel ? `Iniciar teste calibrado (${calibSel.nome})` : 'Iniciar teste com a configuração atual';
     $('teste-iniciar').hidden = !!(teste && !teste.encerrado);
     $('teste-encerrar').hidden = !(teste && !teste.encerrado);
     if (!teste) { st.className = 'conta-status off'; st.textContent = 'Nenhum teste em andamento. Escolha o ativo, o tempo gráfico e o tempo da operação, ligue o Ao vivo e inicie.'; $('teste-resultado').innerHTML = ''; return; }
     const ops = doTeste(), concl = ops.filter(t => t.result && t.result !== 'void');
-    const cfg = `${Live.label(teste.symbol)} · candles de ${durTxt(ivMinOf(teste.interval))} · saída em ${durTxt(teste.horizon * ivMinOf(teste.interval))} · ${MARKET_TXT[teste.market]} · entra com ${pct(teste.limiar)} ou mais${teste.filtroTendencia ? ' e com os indicadores concordando' : ''}`;
+    const cal = teste.calib && CALIB.get(teste.calib);
+    const cfg = `${cal ? 'Calibração ' + cal.nome + ' · ' : ''}${Live.label(teste.symbol)} · candles de ${durTxt(ivMinOf(teste.interval))} · saída em ${durTxt(teste.horizon * ivMinOf(teste.interval))} · ${MARKET_TXT[teste.market]} · entra com ${pct(teste.limiar)} ou mais${teste.filtroTendencia ? ' e com os indicadores concordando' : ''}`;
     const atual = { symbol: state.live && state.live.symbol, interval: state.live && state.live.interval, horizon: params.horizon, market: params.market };
     const diferente = state.live && ['symbol', 'interval', 'horizon', 'market'].some(k => teste[k] !== atual[k]);
     if (teste.encerrado) { st.className = 'conta-status on'; st.textContent = `Teste encerrado: ${concl.length} operações. ${cfg}.`; }
@@ -963,19 +982,46 @@
       ${teste.filtroTendencia ? `<div class="row"><span>Sem entrada (indicadores não concordaram)</span><b>${teste.semConcordancia || 0}</b></div>` : ''}
       <div class="row"><span>${bin ? 'Acerto' : 'Com lucro'} (intervalo de 95%)</span><b>${pct(tot.rate)} (${faixa(tot)})</b></div>
       ${bin ? `<div class="row"><span>Ponto de empate (payout ${teste.payout}%)</span><b>${pct(be)}</b></div>` : ''}
+      ${cal ? `<div class="row"><span>Referência histórica (18 a 25/11)</span><b>${pct(cal.confirmacao.rate)} em ${cal.confirmacao.n}</b></div>` : ''}
       <div class="row"><span>Resultado</span><b class="${tot.pnl >= 0 ? 'pos' : 'neg'}">${smoney(tot.pnl)}</b></div>
       ${veredito ? `<p class="note" style="margin:6px 0">${veredito}</p>` : ''}
+      ${cal ? `<p class="note" style="margin:6px 0">Este teste usa o modelo calibrado (${cal.variaveis}), não o número do painel principal: os dois podem divergir.</p>` : ''}
       ${calib ? `<h4>Calibração: o modelo dava…</h4><table><thead><tr><th>Faixa</th><th>n</th><th>Média</th><th>Real</th><th>Intervalo</th></tr></thead><tbody>${calib}</tbody></table>` : ''}
       ${teste.ultimo ? `<p class="note" style="margin:6px 0 0">Último candle (${hhmm(teste.ultimo.t)}): ${teste.ultimo.acao === 'entrar' ? `entrou (${pct(teste.ultimo.pDir)} a favor${teste.ultimo.contra ? '; contra o movimento recente, o modelo espera correção' : ''})` : (teste.ultimo.motivo || teste.ultimo.acao) + (teste.ultimo.pDir != null ? ` (${pct(teste.ultimo.pDir)})` : '')}.</p>` : ''}
     </div>`;
   }
 
+  // Calibrações prontas: abrem sozinhas o ativo, o tempo gráfico, a saída e a opção binária
+  Model.CALIBRACOES.forEach(c => $('teste-calib').appendChild(new Option(`Calibrada: ${c.nome} (${pct(c.confirmacao.rate)} no histórico)`, c.id)));
+  function aplicarCalibracao(cal) {
+    if (params.market !== 'binary') { params.market = 'binary'; const sel = $('p-market'); if (sel) sel.value = 'binary'; fillAssets(); }
+    symSel.value = cal.symbol; intSel.value = cal.interval; ivAnterior = cal.interval; ajustarTempos();
+    params.horizon = cal.horizon; const inp = $('p-horizon'); if (inp) inp.value = cal.horizon;
+    avisoDuracao = ''; persist();
+    if (!state.live || state.live.symbol !== cal.symbol || state.live.interval !== cal.interval) startLive();
+    else { try { analyze(true); runResearch(); } catch (e) { showError(e.message); } }
+    renderDuracoes(); renderSim();
+  }
+  $('teste-calib').addEventListener('change', e => {
+    const cal = CALIB.get(e.target.value), lim = $('teste-limiar');
+    lim.disabled = !!cal;
+    if (cal) {
+      lim.value = Math.round(cal.limiar * 1000) / 10;
+      const c = cal.confirmacao;
+      $('teste-calib-nota').textContent = `${Live.label(cal.symbol)} · candles de ${durTxt(ivMinOf(cal.interval))} · saída em ${durTxt(cal.horizon * ivMinOf(cal.interval))} · opção binária · entra com ${pct(cal.limiar)} ou mais · ${cal.variaveis}. Fora do período de escolha (18 a 25/11) acertou ${pct(c.rate)} em ${c.n} operações (intervalo de 95%: ${pct(c.low)} a ${pct(c.high)}); a regra atual acertou ${pct(c.regraAtual)} no mesmo período. Ainda não está comprovado: o intervalo inclui o empate de 54,1%. Este teste com dados futuros é o que confirma ou descarta. Ao iniciar, o app troca sozinho para essa configuração e liga o Ao vivo.`;
+    } else lim.value = 53;
+    renderTeste();
+  });
+
   $('teste-iniciar').addEventListener('click', () => {
-    if (!state.live || liveStatus !== 'live') { showError('Ligue o Ao vivo e escolha a configuração antes de iniciar o teste.'); return; }
-    const limiar = Math.max(50, Math.min(80, parseFloat($('teste-limiar').value) || 53)) / 100;
+    const cal = CALIB.get($('teste-calib').value);
+    if (cal) aplicarCalibracao(cal);
+    else if (!state.live || liveStatus !== 'live') { showError('Ligue o Ao vivo e escolha a configuração antes de iniciar o teste.'); return; }
+    const limiar = cal ? cal.limiar : Math.max(50, Math.min(80, parseFloat($('teste-limiar').value) || 53)) / 100;
     const meta = Math.max(30, Math.min(2000, parseInt($('teste-meta').value, 10) || 200));
-    teste = { id: 't' + Date.now(), symbol: state.live.symbol, interval: state.live.interval, horizon: params.horizon, market: params.market, filtroTendencia: $('teste-filtro').checked, semConcordancia: 0,
+    teste = { id: 't' + Date.now(), symbol: state.live.symbol, interval: state.live.interval, horizon: params.horizon, market: params.market, filtroTendencia: !cal && $('teste-filtro').checked, semConcordancia: 0,
       payout: params.payout, feePct: params.feePct, limiar, meta, inicio: Date.now(), avaliados: 0, entradas: 0, abaixo: 0, ocupado: 0, encerrado: false };
+    if (cal) Object.assign(teste, { calib: cal.id, modelo: cal.modelo });
     showError(''); ensureAudio(); persist(); renderTeste();
   });
   $('teste-encerrar').addEventListener('click', e => {

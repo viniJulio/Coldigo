@@ -366,8 +366,23 @@
     };
   }
 
+  // Calibrações para o maior acerto (scripts/calibrar.js, 25/11/2026): escolhidas pelo limite inferior
+  // de acerto em 1 a 15/11 e medidas fora da escolha em 18 a 25/11 (confirmacao). Promissoras, ainda
+  // não comprovadas: servem para testar com dados futuros no teste automático.
+  const CALIBRACOES = [
+    { id: 'eth5', nome: 'ETH · saída em 5 min', symbol: 'ETHUSDT', interval: '1m', horizon: 5, limiar: 0.56,
+      modelo: { features: ['ret1', 'ret3', 'pctB', 'rsi', 'vwapDist', 'emaDist'], lambda: 3000, trainN: 3000 },
+      variaveis: 'correção depois de movimento, 6 variáveis', confirmacao: { n: 229, rate: 0.603, low: 0.538, high: 0.664, regraAtual: 0.552 } },
+    { id: 'eth10', nome: 'ETH · saída em 10 min', symbol: 'ETHUSDT', interval: '5m', horizon: 2, limiar: 0.60,
+      modelo: { features: FEATURES.slice(), lambda: 300, trainN: 1500 },
+      variaveis: 'todas as 16 variáveis', confirmacao: { n: 145, rate: 0.607, low: 0.526, high: 0.683, regraAtual: 0.535 } },
+    { id: 'eth15', nome: 'ETH · saída em 15 min', symbol: 'ETHUSDT', interval: '5m', horizon: 3, limiar: 0.58,
+      modelo: { features: CORE_FEATURES.slice(), lambda: 30, trainN: 3000 },
+      variaveis: 'núcleo de 8 variáveis', confirmacao: { n: 207, rate: 0.594, low: 0.526, high: 0.659, regraAtual: 0.537 } }
+  ];
+
   const api = {
-    FEATURES, CORE_FEATURES, WARM, DEFAULTS, buildFeatures, labels, fitLogistic, predictProb, fitLatest, walkForward,
+    CALIBRACOES, FEATURES, CORE_FEATURES, WARM, DEFAULTS, buildFeatures, labels, fitLogistic, predictProb, fitLatest, walkForward,
     evaluate, evaluateCosts, strategy, auc, normQuantile, wilsonLower, zForTests, solve, quantization, QUANTIZED_LIMIT
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
