@@ -2,20 +2,18 @@
 
 Portal multi-escritório que busca todo dia, no Portal Nacional da NFS-e, as notas de serviço (emitidas e recebidas) de todos os clientes de um escritório de contabilidade, organiza por cliente e mês, entrega em ZIP e avisa o que merece atenção. Veja o documento de validação da ideia (roteiro de conversas com contadores) fora deste repositório.
 
-Sem dependências npm. Precisa de **Node 22.13+** (usa `node:sqlite`) e do **openssl** no servidor (para ler o certificado A1).
+Sem dependências npm. Precisa de **Node 22.13+** (usa `node:sqlite`). O `openssl` é opcional (só para certificados A1 em formato antigo).
 
 ## Abrir no VS Code
 
 1. Instale o **Node.js 22.13 ou mais novo** (versão LTS em https://nodejs.org). Isso instala também o `npm`. **Feche e reabra o VS Code** depois de instalar e confira com `node -v` e `npm -v`.
-   - **Windows:** o `openssl` (usado só para ler o certificado A1 que você enviar) vem junto com o **Git for Windows** (https://git-scm.com); o sistema o encontra sozinho. Se o instalou em outro lugar, defina a variável `NFSE_OPENSSL` com o caminho do `openssl.exe`.
-   - **macOS/Linux:** o `openssl` já vem instalado.
-   - Para ver as telas com notas fictícias não precisa de `openssl`: só ao enviar um certificado.
+   - **Certificados:** o Node lê sozinho os certificados A1 em formato moderno. Só os de formato antigo (RC2/3DES, comuns em certificados emitidos há alguns anos) precisam do `openssl`: no Windows ele vem com o **Git for Windows** (https://git-scm.com) e é encontrado automaticamente; se estiver em outro lugar, defina `NFSE_OPENSSL` com o caminho do `openssl.exe`. No macOS/Linux já vem instalado.
 2. No VS Code: **Arquivo > Abrir Pasta…** e escolha esta pasta (`nfse-contadores`).
 3. No terminal do VS Code (**Ctrl+'**):
 
 ```bash
 npm start       # http://localhost:8090  (ADN simulado, dados fictícios)
-npm test        # 23 testes (isolamento entre escritórios, sincronização, acesso, ZIP)
+npm test        # 26 testes (isolamento entre escritórios, sincronização, acesso, ZIP)
 npm run dev     # igual ao start, reinicia ao salvar arquivos
 ```
 

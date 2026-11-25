@@ -51,12 +51,12 @@ function criarApi({ db, config, sync }) {
   const clienteOu404 = (repo, id) => repo.clientes.obter(comoId(id)) || (() => { throw erro(404, 'Cliente não encontrado.'); })();
   const notaOu404 = (repo, id) => repo.notas.obter(comoId(id)) || (() => { throw erro(404, 'Nota não encontrada.'); })();
 
-  function salvarCertificado(repo, clienteId, corpo) {
+  async function salvarCertificado(repo, clienteId, corpo) {
     const nome = str(corpo.nome_arquivo || 'certificado.pfx', 200, 'Nome do arquivo');
     const senha = str(corpo.senha, 200, 'Senha do certificado');
     const pfx = Buffer.from(String(corpo.pfx_base64 || ''), 'base64');
     let info;
-    try { info = lerPfx(pfx, senha); } catch (e) { throw erro(400, e.message); }
+    try { info = await lerPfx(pfx, senha); } catch (e) { throw erro(400, e.message); }
     if (info.validade < new Date().toISOString().slice(0, 10)) throw erro(400, `Este certificado venceu em ${info.validade}.`);
     const chave = chaveDoEscritorio(config.masterKey, repo.tid);
     const ctx = (fim) => `cert:${repo.tid}:${clienteId ?? 'escritorio'}:${fim}`;
