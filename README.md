@@ -91,6 +91,16 @@ Para o câmbio real (feed da corretora ou do MetaTrader), exporte o histórico e
 
 Para medir a assertividade com regras fixas, o cartão **Teste automático** cria um plano com a configuração aberta (ativo, tempo gráfico, tempo da operação e mercado), uma **probabilidade mínima a favor** (padrão 53%) e uma **meta de operações** (padrão 200). A cada candle fechado, o simulador entra sozinho quando o modelo passa do limite para um lado, uma operação por vez, no horário oficial de fechamento do candle (o vencimento cai no fechamento de um candle futuro e a próxima entrada pode acontecer nele). Só no simulador, nunca na conta demo.
 
+**Calibrações prontas.** Em **Configuração**, além do modo manual, há três calibrações do ETH, vindas de `scripts/calibrar.js` (ver Avaliação com dados reais):
+
+| Calibração | Candles | Saída | Variáveis do modelo | Entra com | Fora da escolha (18 a 25/11) |
+|---|---|---|---|---|---|
+| ETH · 5 min | 1 min | 5 candles | correção depois de movimento (6), λ=3000, janela 3000 | ≥ 56% | 60,3% em 229 (regra atual 55,2%) |
+| ETH · 10 min | 5 min | 2 candles | todas (16), λ=300, janela 1500 | ≥ 60% | 60,7% em 145 (regra atual 53,5%) |
+| ETH · 15 min | 5 min | 3 candles | núcleo (8), λ=30, janela 3000 | ≥ 58% | 59,4% em 207 (regra atual 53,7%) |
+
+Ao iniciar, o app troca sozinho para o ETH, o tempo gráfico, a saída e a opção binária da calibração, e liga o Ao vivo. O teste usa o **modelo calibrado** (as próprias variáveis, regularização e janela), não o número do painel principal, e cada entrada guarda qual calibração a decidiu. Ainda não estão comprovadas: o intervalo de 95% inclui o empate de 54,1%. Este teste com dados futuros é o que confirma ou descarta. O BTC não tem calibração: nele, calibrar não melhorou a regra atual.
+
 O plano não muda no meio: se o ativo, o tempo ou o mercado mudarem, o teste pausa; o Ao vivo desligado também pausa. Enquanto ele roda, a entrada automática dos alertas fica desligada, para não misturar regras. O cartão mostra candles avaliados, entradas, vezes em que o modelo ficou abaixo do limite, acerto com intervalo de 95%, ponto de empate, resultado e calibração, só das operações do teste.
 
 **Filtro de tendência (opcional):** "Só entrar quando os indicadores concordarem com o modelo". Avaliação com dados reais (25/11/2026, 1 min, saída em 5, payout 85%, fora da amostra, 8 testes): só o modelo com 53% acertou 55,0% em 947 operações no BTC e 58,1% em 246 no EUR/USD; com o filtro, 54,4% em 193 e 63,2% em só 19; seguir só os indicadores acertou 48,7% e 44,6%; PUT sempre, 51,1% e 47,3%. Nenhuma regra comprovou vantagem. Em prazos curtos o preço costuma corrigir depois de um movimento, por isso o modelo às vezes entra contra o movimento recente (o teste avisa quando isso acontece). O filtro fica desligado por padrão; para compará-lo, rode um plano separado.
