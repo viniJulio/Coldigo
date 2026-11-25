@@ -4,3 +4,5 @@ node_modules/
 ponte/config.json
 ponte/operacoes.json
 ponte/*.pem
+# NFS-e Contadores: banco, chave mestra e certificados ficam só na máquina
+nfse/data/

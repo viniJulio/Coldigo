@@ -8,6 +8,8 @@
     "test": "node --test test/*.test.js",
     "avaliar": "node scripts/avaliar.js",
     "versao": "node scripts/versao.js",
-    "ponte": "node ponte/servidor.js"
+    "ponte": "node ponte/servidor.js",
+    "nfse": "node --disable-warning=ExperimentalWarning nfse/server.js",
+    "nfse:test": "node --disable-warning=ExperimentalWarning --test nfse/test/*.test.js"
   }
 }
