@@ -88,6 +88,8 @@ Para medir a assertividade com regras fixas, o cartão **Teste automático** cri
 
 O plano não muda no meio: se o ativo, o tempo ou o mercado mudarem, o teste pausa; o Ao vivo desligado também pausa. Enquanto ele roda, a entrada automática dos alertas fica desligada, para não misturar regras. O cartão mostra candles avaliados, entradas, vezes em que o modelo ficou abaixo do limite, acerto com intervalo de 95%, ponto de empate, resultado e calibração, só das operações do teste.
 
+**Filtro de tendência (opcional):** "Só entrar quando os indicadores concordarem com o modelo". Avaliação com dados reais (25/11/2026, 1 min, saída em 5, payout 85%, fora da amostra, 8 testes): só o modelo com 53% acertou 55,0% em 947 operações no BTC e 58,1% em 246 no EUR/USD; com o filtro, 54,4% em 193 e 63,2% em só 19; seguir só os indicadores acertou 48,7% e 44,6%; PUT sempre, 51,1% e 47,3%. Nenhuma regra comprovou vantagem. Em prazos curtos o preço costuma corrigir depois de um movimento, por isso o modelo às vezes entra contra o movimento recente (o teste avisa quando isso acontece). O filtro fica desligado por padrão; para compará-lo, rode um plano separado.
+
 ### Desempenho das suas entradas
 
 O cartão **Desempenho das suas entradas** mede a assertividade das operações encerradas no simulador: acerto com **intervalo de 95%** (para saber se já dá para concluir algo), ponto de empate do payout, resultado, acerto com e sem sinal validado, a favor e contra o modelo, **calibração** (quando o modelo dava 55%, 60%…, quanto acertou de fato) e por ativo. **Exportar operações (CSV)** baixa todas as operações, com a probabilidade do modelo na hora de cada entrada, para análise em planilha.

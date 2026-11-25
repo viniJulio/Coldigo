@@ -170,7 +170,7 @@ test('toCSV: cabeçalho, separador ";" e decimal com vírgula', () => {
 test('teste automático: entra só no plano, a favor do modelo, acima do limite e uma por vez', () => {
   const plano = { symbol: 'EUR/USD', interval: '1m', horizon: 5, market: 'binary', limiar: 0.53, meta: 200 };
   const agora = o => Object.assign({ live: true, symbol: 'EUR/USD', interval: '1m', horizon: 5, market: 'binary', p: 0.56, abertas: 0, concluidas: 10 }, o);
-  assert.deepEqual(S.decidirTeste(plano, agora()), { acao: 'entrar', side: 'up', pDir: 0.56 });
+  assert.deepEqual(S.decidirTeste(plano, agora()), { acao: 'entrar', side: 'up', pDir: 0.56, contraMovimento: false });
   const put = S.decidirTeste(plano, agora({ p: 0.44 }));
   assert.equal(put.acao, 'entrar'); assert.equal(put.side, 'down'); assert.ok(Math.abs(put.pDir - 0.56) < 1e-12);
   assert.equal(S.decidirTeste(plano, agora({ p: 0.52 })).acao, 'pular');            // abaixo do limite
@@ -190,4 +190,18 @@ test('Portfolio guarda o plano do teste na operação', () => {
   const p = new S.Portfolio({ start: 1000 });
   const tr = p.openTrade(Object.assign({ side: 'up', plano: 't1' }, base));
   assert.equal(tr.plano, 't1');
+});
+
+test('teste automático: filtro de tendência exige que os indicadores concordem', () => {
+  const plano = { symbol: 'BTCUSDT', interval: '1m', horizon: 5, market: 'binary', limiar: 0.53, meta: 200, filtroTendencia: true };
+  const agora = o => Object.assign({ live: true, symbol: 'BTCUSDT', interval: '1m', horizon: 5, market: 'binary', p: 0.44, abertas: 0, concluidas: 0 }, o);
+  // o caso do print: modelo PUT (p de alta 44%) com indicadores em ALTA -> não entra
+  const d = S.decidirTeste(plano, agora({ vies: 'up' }));
+  assert.equal(d.acao, 'pular'); assert.equal(d.semConcordancia, true);
+  assert.equal(S.decidirTeste(plano, agora({ vies: 'neutral' })).acao, 'pular');
+  assert.equal(S.decidirTeste(plano, agora({ vies: 'down' })).acao, 'entrar');
+  // sem o filtro entra, e marca que foi contra o movimento recente
+  const sem = S.decidirTeste(Object.assign({}, plano, { filtroTendencia: false }), agora({ vies: 'up' }));
+  assert.equal(sem.acao, 'entrar'); assert.equal(sem.side, 'down'); assert.equal(sem.contraMovimento, true);
+  assert.equal(S.decidirTeste(Object.assign({}, plano, { filtroTendencia: false }), agora({ vies: 'down' })).contraMovimento, false);
 });

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Coldigo — Análise gráfica day trade</title>
-  <link rel="stylesheet" href="css/style.css?v=2026-11-24.10">
+  <link rel="stylesheet" href="css/style.css?v=2026-11-25.1">
 </head>
 <body>
   <header class="topbar">
@@ -84,6 +84,8 @@
           <label for="teste-limiar">Probabilidade mínima a favor (%)</label><input id="teste-limiar" type="number" min="50" max="80" step="0.5" value="53">
           <label for="teste-meta">Meta de operações</label><input id="teste-meta" type="number" min="30" max="2000" step="10" value="200">
         </div>
+        <label class="chk" id="teste-filtro-wrap"><input type="checkbox" id="teste-filtro"> Só entrar quando os indicadores concordarem com o modelo (filtro de tendência)</label>
+        <p class="note" id="teste-filtro-nota">Nos dados reais (1 min, saída em 5), exigir essa concordância não melhorou o acerto e cortou as entradas em 5 vezes; seguir só os indicadores acertou 44% a 49%, porque em prazos curtos o preço costuma corrigir. Teste num plano separado para comparar.</p>
         <div class="row-btns"><button class="btn small primary" id="teste-iniciar" type="button">Iniciar teste com a configuração atual</button><button class="btn small" id="teste-encerrar" type="button" hidden>Encerrar teste</button></div>
         <div id="teste-resultado"></div>
         <p class="note">O teste usa o ativo, o tempo gráfico, o tempo da operação e o mercado abertos agora, e não muda no meio: se você trocar algo, ele pausa. A cada candle fechado, entra sozinho quando o modelo passa do limite para um lado, uma operação por vez. Deixe esta aba aberta com o Ao vivo ligado.</p>
@@ -140,16 +142,16 @@
     </div>
   </dialog>
 
-  <script>window.COLDIGO_VERSION = '2026-11-24.10';</script>
-  <script src="js/indicators.js?v=2026-11-24.10"></script>
-  <script src="js/forecast.js?v=2026-11-24.10"></script>
-  <script src="js/data.js?v=2026-11-24.10"></script>
-  <script src="js/live.js?v=2026-11-24.10"></script>
-  <script src="js/forex.js?v=2026-11-24.10"></script>
-  <script src="js/model.js?v=2026-11-24.10"></script>
-  <script src="js/sim.js?v=2026-11-24.10"></script>
-  <script src="js/ponte.js?v=2026-11-24.10"></script>
-  <script src="js/chart.js?v=2026-11-24.10"></script>
-  <script src="js/app.js?v=2026-11-24.10"></script>
+  <script>window.COLDIGO_VERSION = '2026-11-25.1';</script>
+  <script src="js/indicators.js?v=2026-11-25.1"></script>
+  <script src="js/forecast.js?v=2026-11-25.1"></script>
+  <script src="js/data.js?v=2026-11-25.1"></script>
+  <script src="js/live.js?v=2026-11-25.1"></script>
+  <script src="js/forex.js?v=2026-11-25.1"></script>
+  <script src="js/model.js?v=2026-11-25.1"></script>
+  <script src="js/sim.js?v=2026-11-25.1"></script>
+  <script src="js/ponte.js?v=2026-11-25.1"></script>
+  <script src="js/chart.js?v=2026-11-25.1"></script>
+  <script src="js/app.js?v=2026-11-25.1"></script>
 </body>
 </html>

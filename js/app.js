@@ -129,6 +129,7 @@
         <div class="gauge"><i style="left:${pos}%"></i></div>
         <div class="legend"><span>−1 baixa</span><span style="margin-left:auto">+1 alta</span></div>
         <p class="note" style="margin:8px 0 0">${reasons(a)}</p>
+        <p class="note" style="margin:6px 0 0">Não é o sinal de entrada. Nos testes com dados reais, seguir este viés em 1 a 5 minutos acertou 44% a 49%: em prazos curtos o preço costuma corrigir depois de um movimento. O simulador e o teste automático seguem o modelo.</p>
       </div>
 
       <div class="card">
@@ -917,7 +918,8 @@
     const d = Sim.decidirTeste(teste, {
       live: !!state.live && liveStatus === 'live', symbol: state.live && state.live.symbol, interval: state.live && state.live.interval,
       horizon: params.horizon, market: params.market, p: state.pred ? state.pred.p : null,
-      abertas: ops.filter(t => !t.result).length, concluidas: ops.filter(t => t.result && t.result !== 'void').length
+      abertas: ops.filter(t => !t.result).length, concluidas: ops.filter(t => t.result && t.result !== 'void').length,
+      vies: state.analysis ? state.analysis.bias : 'neutral'
     });
     teste.avaliados++;
     if (d.acao === 'encerrado' && d.motivo === 'meta atingida') { teste.encerrado = true; teste.fim = Date.now(); }
@@ -926,20 +928,22 @@
         enterTrade(d.side, 'teste', { soSimulador: true, plano: teste.id, t: candle.t + state.live.intervalMs });
         teste.entradas++;
       } catch (e) { d.motivo = e.message; }
-    } else if (d.acao === 'pular' && d.pDir != null) teste.abaixo++;
+    } else if (d.acao === 'pular' && d.semConcordancia) teste.semConcordancia = (teste.semConcordancia || 0) + 1;
+    else if (d.acao === 'pular' && d.pDir != null) teste.abaixo++;
     else if (d.acao === 'pular' && /em andamento/.test(d.motivo)) teste.ocupado++;
-    teste.ultimo = { t: Date.now(), acao: d.acao, motivo: d.motivo || '', pDir: d.pDir };
+    teste.ultimo = { t: Date.now(), acao: d.acao, motivo: d.motivo || '', pDir: d.pDir, contra: !!d.contraMovimento };
     persist(); renderTeste();
   }
 
   function renderTeste() {
     const st = $('teste-status');
     $('teste-form').hidden = !!(teste && !teste.encerrado);
+    $('teste-filtro-wrap').hidden = $('teste-filtro-nota').hidden = !!(teste && !teste.encerrado);
     $('teste-iniciar').hidden = !!(teste && !teste.encerrado);
     $('teste-encerrar').hidden = !(teste && !teste.encerrado);
     if (!teste) { st.className = 'conta-status off'; st.textContent = 'Nenhum teste em andamento. Escolha o ativo, o tempo gráfico e o tempo da operação, ligue o Ao vivo e inicie.'; $('teste-resultado').innerHTML = ''; return; }
     const ops = doTeste(), concl = ops.filter(t => t.result && t.result !== 'void');
-    const cfg = `${Live.label(teste.symbol)} · candles de ${durTxt(ivMinOf(teste.interval))} · saída em ${durTxt(teste.horizon * ivMinOf(teste.interval))} · ${MARKET_TXT[teste.market]} · entra com ${pct(teste.limiar)} ou mais`;
+    const cfg = `${Live.label(teste.symbol)} · candles de ${durTxt(ivMinOf(teste.interval))} · saída em ${durTxt(teste.horizon * ivMinOf(teste.interval))} · ${MARKET_TXT[teste.market]} · entra com ${pct(teste.limiar)} ou mais${teste.filtroTendencia ? ' e com os indicadores concordando' : ''}`;
     const atual = { symbol: state.live && state.live.symbol, interval: state.live && state.live.interval, horizon: params.horizon, market: params.market };
     const diferente = state.live && ['symbol', 'interval', 'horizon', 'market'].some(k => teste[k] !== atual[k]);
     if (teste.encerrado) { st.className = 'conta-status on'; st.textContent = `Teste encerrado: ${concl.length} operações. ${cfg}.`; }
@@ -957,12 +961,13 @@
       <div class="row"><span>Candles avaliados</span><b>${teste.avaliados}</b></div>
       <div class="row"><span>Entradas (modelo passou do limite)</span><b>${teste.entradas}</b></div>
       <div class="row"><span>Sem entrada (modelo abaixo do limite)</span><b>${teste.abaixo}</b></div>
+      ${teste.filtroTendencia ? `<div class="row"><span>Sem entrada (indicadores não concordaram)</span><b>${teste.semConcordancia || 0}</b></div>` : ''}
       <div class="row"><span>${bin ? 'Acerto' : 'Com lucro'} (intervalo de 95%)</span><b>${pct(tot.rate)} (${faixa(tot)})</b></div>
       ${bin ? `<div class="row"><span>Ponto de empate (payout ${teste.payout}%)</span><b>${pct(be)}</b></div>` : ''}
       <div class="row"><span>Resultado</span><b class="${tot.pnl >= 0 ? 'pos' : 'neg'}">${smoney(tot.pnl)}</b></div>
       ${veredito ? `<p class="note" style="margin:6px 0">${veredito}</p>` : ''}
       ${calib ? `<h4>Calibração: o modelo dava…</h4><table><thead><tr><th>Faixa</th><th>n</th><th>Média</th><th>Real</th><th>Intervalo</th></tr></thead><tbody>${calib}</tbody></table>` : ''}
-      ${teste.ultimo ? `<p class="note" style="margin:6px 0 0">Último candle (${hhmm(teste.ultimo.t)}): ${teste.ultimo.acao === 'entrar' ? `entrou (${pct(teste.ultimo.pDir)} a favor)` : (teste.ultimo.motivo || teste.ultimo.acao) + (teste.ultimo.pDir != null ? ` (${pct(teste.ultimo.pDir)})` : '')}.</p>` : ''}
+      ${teste.ultimo ? `<p class="note" style="margin:6px 0 0">Último candle (${hhmm(teste.ultimo.t)}): ${teste.ultimo.acao === 'entrar' ? `entrou (${pct(teste.ultimo.pDir)} a favor${teste.ultimo.contra ? '; contra o movimento recente, o modelo espera correção' : ''})` : (teste.ultimo.motivo || teste.ultimo.acao) + (teste.ultimo.pDir != null ? ` (${pct(teste.ultimo.pDir)})` : '')}.</p>` : ''}
     </div>`;
   }
 
@@ -970,7 +975,7 @@
     if (!state.live || liveStatus !== 'live') { showError('Ligue o Ao vivo e escolha a configuração antes de iniciar o teste.'); return; }
     const limiar = Math.max(50, Math.min(80, parseFloat($('teste-limiar').value) || 53)) / 100;
     const meta = Math.max(30, Math.min(2000, parseInt($('teste-meta').value, 10) || 200));
-    teste = { id: 't' + Date.now(), symbol: state.live.symbol, interval: state.live.interval, horizon: params.horizon, market: params.market,
+    teste = { id: 't' + Date.now(), symbol: state.live.symbol, interval: state.live.interval, horizon: params.horizon, market: params.market, filtroTendencia: $('teste-filtro').checked, semConcordancia: 0,
       payout: params.payout, feePct: params.feePct, limiar, meta, inicio: Date.now(), avaliados: 0, entradas: 0, abaixo: 0, ocupado: 0, encerrado: false };
     showError(''); ensureAudio(); persist(); renderTeste();
   });
