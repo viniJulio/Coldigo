@@ -6,7 +6,10 @@ Sem dependências npm. Precisa de **Node 22.13+** (usa `node:sqlite`) e do **ope
 
 ## Abrir no VS Code
 
-1. Instale o **Node 22.13 ou mais novo** (`node -v` para conferir) e o **openssl** (já vem no macOS/Linux; no Windows use o Git Bash ou instale o OpenSSL).
+1. Instale o **Node.js 22.13 ou mais novo** (versão LTS em https://nodejs.org). Isso instala também o `npm`. **Feche e reabra o VS Code** depois de instalar e confira com `node -v` e `npm -v`.
+   - **Windows:** o `openssl` (usado só para ler o certificado A1 que você enviar) vem junto com o **Git for Windows** (https://git-scm.com); o sistema o encontra sozinho. Se o instalou em outro lugar, defina a variável `NFSE_OPENSSL` com o caminho do `openssl.exe`.
+   - **macOS/Linux:** o `openssl` já vem instalado.
+   - Para ver as telas com notas fictícias não precisa de `openssl`: só ao enviar um certificado.
 2. No VS Code: **Arquivo > Abrir Pasta…** e escolha esta pasta (`nfse-contadores`).
 3. No terminal do VS Code (**Ctrl+'**):
 

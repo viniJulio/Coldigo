@@ -9,11 +9,12 @@ const { abrir } = require('../src/db');
 const { criarServicoSync } = require('../src/sync');
 const { criarServidor } = require('../server');
 const { criarSimulador } = require('../src/simulador');
+const { caminhoOpenssl } = require('../src/cert');
 
 function gerarPfx(dir, { cn = 'EMPRESA TESTE:11222333000181', dias = 30, senha = 'segredo123' } = {}) {
   const k = path.join(dir, `k-${Math.random()}.pem`); const c = path.join(dir, `c-${Math.random()}.pem`); const p = path.join(dir, `x-${Math.random()}.pfx`);
-  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', k, '-out', c, '-subj', `/CN=${cn}`, '-days', String(dias)], { stdio: 'pipe' });
-  execFileSync('openssl', ['pkcs12', '-export', '-out', p, '-inkey', k, '-in', c, '-passout', `pass:${senha}`], { stdio: 'pipe' });
+  execFileSync(caminhoOpenssl(), ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', k, '-out', c, '-subj', `/CN=${cn}`, '-days', String(dias)], { stdio: 'pipe' });
+  execFileSync(caminhoOpenssl(), ['pkcs12', '-export', '-out', p, '-inkey', k, '-in', c, '-passout', `pass:${senha}`], { stdio: 'pipe' });
   return { base64: fs.readFileSync(p).toString('base64'), senha };
 }
 

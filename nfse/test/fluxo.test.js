@@ -3,11 +3,29 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const zlib = require('node:zlib');
 const { subir, gerarPfx } = require('./ajuda');
 const { cnpjComDv, cnpjValido } = require('../src/util');
 const { lerNfse } = require('../src/xml');
 const { gerarXmlNfse } = require('../src/simulador');
+
+// Leitor mínimo de ZIP: confere CRC e tamanho de cada entrada e devolve os nomes.
+function nomesDoZip(buf) {
+  const fim = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  assert.ok(fim >= 0, 'ZIP sem diretório central');
+  const total = buf.readUInt16LE(fim + 10); let pos = buf.readUInt32LE(fim + 16); const nomes = [];
+  for (let i = 0; i < total; i++) {
+    assert.equal(buf.readUInt32LE(pos), 0x02014b50);
+    const crc = buf.readUInt32LE(pos + 16); const comp = buf.readUInt32LE(pos + 20); const tam = buf.readUInt32LE(pos + 24);
+    const nNome = buf.readUInt16LE(pos + 28); const extra = buf.readUInt16LE(pos + 30); const coment = buf.readUInt16LE(pos + 32); const desloc = buf.readUInt32LE(pos + 42);
+    nomes.push(buf.subarray(pos + 46, pos + 46 + nNome).toString('utf8'));
+    const ini = desloc + 30 + buf.readUInt16LE(desloc + 26) + buf.readUInt16LE(desloc + 28);
+    const dados = zlib.inflateRawSync(buf.subarray(ini, ini + comp));
+    assert.equal(dados.length, tam); assert.equal(zlib.crc32(dados), crc);
+    pos += 46 + nNome + extra + coment;
+  }
+  return nomes;
+}
 
 const HOJE = new Date('2026-11-25T12:00:00Z');
 const CNPJ = cnpjComDv('112223330001');
@@ -90,8 +108,7 @@ test('cliente sem nota no mês anterior gera alerta', async () => {
 test('ZIP do mês é válido e organizado por cliente/mês/direção', async () => {
   const r = await u.get(`/api/clientes/${id}/zip?competencia=2026-10`);
   assert.equal(r.status, 200); assert.equal(r.tipo, 'application/zip');
-  const arq = path.join(amb.dir, 'saida.zip'); fs.writeFileSync(arq, r.dados);
-  const lista = execFileSync('python3', ['-I', '-c', 'import zipfile,sys;z=zipfile.ZipFile(sys.argv[1]);assert z.testzip() is None;print("\\n".join(z.namelist()))', arq]).toString();
+  const lista = nomesDoZip(r.dados).join('\n');
   assert.match(lista, new RegExp(`${CNPJ}-Cliente_Um_Ltda/2026-10/emitidas/`));
   assert.match(lista, /\/recebidas\//); assert.match(lista, /resumo\.csv/);
   assert.equal((await u.get(`/api/clientes/${id}/zip?competencia=2020-01`)).status, 404);
